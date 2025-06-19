@@ -6,7 +6,7 @@ The packets are read from stdin and then printed out to stdout, so it is easy to
 
 Refer to [schematics.pdf](./schematics.pdf) file in this folder about how to build the hardware bridge.
 Note that you'll likely want to use a different current limiter, with 0.9A limit or less.
-You may also need additional ESD protection, please refer to [Jacdac module reference designs](https://github.com/microsoft/jacdac-ddk/tree/main/electronics/altium/reference-designs)
+You may also need additional ESD protection, please refer to [Jacdac module reference designs](https://github.com/jacdac/jacdac-ddk/tree/main/electronics/altium/reference-designs)
 
 This is a prototype and has not been EMI-tested.
 

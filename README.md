@@ -1,25 +1,25 @@
 # Jacdac for STM32F0xx and STM32G0xx
 
-This repository contains firmware for [Jacdac](https://aka.ms/jacdac) modules based on STM32F0xx and STM32G0xx
-chips and is part of the [Jacdac Device Development Kit](https://microsoft.github.io/jacdac-docs/ddk/).
+This repository contains firmware for [Jacdac](https://jacdac.github.io/jacdac-docs/) modules based on STM32F0xx and STM32G0xx
+chips and is part of the [Jacdac Device Development Kit](https://jacdac.github.io/jacdac-docs/ddk/).
 
 ## Bootloader
 
 This repository contains both the firmware for running services (eg., accelerometer service) on a Jacdac module,
 and a bootloader which allows for updating the firmware using the Jacdac protocol.
-This update process can be performed by the user from the [Jacdac website](https://microsoft.github.io/jacdac-docs/tools/updater)
+This update process can be performed by the user from the [Jacdac website](https://jacdac.github.io/jacdac-docs/tools/updater)
 (while developing firmware you will typically use a debugger to deploy both the bootloader and the firmware).
 
 ## Development
 
-The top-level repo to build is [jacdac-module-template](https://github.com/microsoft/jacdac-module-template).
-It imports as submodules [this repo (jacdac-stm32x0)](https://github.com/microsoft/jacdac-stm32x0) 
-and [jacdac-c](https://github.com/microsoft/jacdac-c)
+The top-level repo to build is [jacdac-module-template](https://github.com/jacdac/jacdac-module-template).
+It imports as submodules [this repo (jacdac-stm32x0)](https://github.com/jacdac/jacdac-stm32x0) 
+and [jacdac-c](https://github.com/jacdac/jacdac-c)
 (which contains platform-independent code implementing Jacdac services, as well as various I2C drivers).
 
 When building your own firmware, you will need to create your own repository from `jacdac-module-template` template.
-You can do it by following this link https://github.com/microsoft/jacdac-module-template/generate
-or using the green "Use this template" button in top-right corner at https://github.com/microsoft/jacdac-module-template
+You can do it by following this link https://github.com/jacdac/jacdac-module-template/generate
+or using the green "Use this template" button in top-right corner at https://github.com/jacdac/jacdac-module-template
 If you're just playing around, you can simply clone `jacdac-module-template`.
 
 All the instructions below use your copy of `jacdac-module-template` as the root folder.
@@ -154,7 +154,7 @@ which can be flashed with any software, in this case `built/touch-sensor-1.0/com
 
 ## Adding new modules
 
-* [create a new repo](https://github.com/microsoft/jacdac-module-template/generate) from `jacdac-module-template`;
+* [create a new repo](https://github.com/jacdac/jacdac-module-template/generate) from `jacdac-module-template`;
   let's say the new repo is called `jacdac-acme-corp-modules`
 * update `jacdac-stm32` and `jacdac-c` submodules (eg., with `make update-submodules`)
 * copy `targets/_example/` to `targets/buzzer-v1.0/` (replacing `buzzer-v1.0` with the name of the module or series of modules)
@@ -163,7 +163,7 @@ which can be flashed with any software, in this case `built/touch-sensor-1.0/com
   unless using F0 chip
 * edit [targets/buzzer-v1.0/profile/module.c](targets/_example/profile/module.c) 
   to include your module name and used services (follow comments in `module.c`);
-  see [jd_services.h](https://github.com/microsoft/jacdac-c/blob/master/services/jd_services.h)
+  see [jd_services.h](https://github.com/jacdac/jacdac-c/blob/master/services/jd_services.h)
   for list of services
 * rename `module.c` to match the type of module (eg. `buzzer.c`)
 * if you have several modules with non-conflicting `board.h` definitions,
@@ -174,7 +174,7 @@ which can be flashed with any software, in this case `built/touch-sensor-1.0/com
 * make sure to never change the firmware identifier number, as that will break future firmware updates
 
 If you copy `targets/jm-*/profiles/something.c` from
-[jacdac-msr-modules](https://github.com/microsoft/jacdac-msr-modules) to start your own module, remember to rename it, and
+[jacdac-msr-modules](https://github.com/jacdac/jacdac-msr-modules) to start your own module, remember to rename it, and
 set the `FIRMWARE_IDENTIFIER` to `0` (the one in `targets/_examples` already has it set to `0`).
 This way, the build process will generate a new firmware identifier.
 
@@ -186,7 +186,7 @@ When you run `make drop` now, you should get a `.uf2` file combining firmware fo
 
 ## Adding new services and drivers
 
-This topic is [covered in jacdac-c](https://github.com/microsoft/jacdac-c#adding-new-services).
+This topic is [covered in jacdac-c](https://github.com/jacdac/jacdac-c#adding-new-services).
 When adding services or drivers, you can put them in `addons/` folder of your modules repo,
 or submit them as PRs in `jacdac-c`.
 
@@ -205,14 +205,4 @@ You should probably also copy over `CHANGES.md`, so your users have some idea of
 
 ## Contributing
 
-This project welcomes contributions and suggestions.  Most contributions require you to agree to a
-Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
-the rights to use your contribution. For details, visit https://cla.opensource.microsoft.com.
-
-When you submit a pull request, a CLA bot will automatically determine whether you need to provide
-a CLA and decorate the PR appropriately (e.g., status check, comment). Simply follow the instructions
-provided by the bot. You will only need to do this once across all repos using our CLA.
-
-This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
-For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
-contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+This project welcomes contributions and suggestions.
