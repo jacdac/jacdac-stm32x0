@@ -1,4 +1,5 @@
 #include "jdstm.h"
+#include "blhw.h"
 
 void pin_set(int pin, int v) {
     if ((uint8_t)pin == NO_PIN)
