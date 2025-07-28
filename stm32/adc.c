@@ -226,7 +226,7 @@ static const uint32_t channels_PB[] = {
 #endif
 #endif
 
-uint32_t adc_read_temp(void) {
+int32_t adc_read_temp(void) {
 #ifdef STM32L4
     set_sampling_time(LL_ADC_SAMPLINGTIME_247CYCLES_5, LL_ADC_CHANNEL_TEMPSENSOR);
 #elif NEW_ADC
