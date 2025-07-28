@@ -108,7 +108,7 @@ endif
 ifneq ($(BLUP),)
 DEFINES += -DBLUP
 CPPFLAGS += -I$(JD_STM)/bl
-C_SRC += $(JD_STM)/src/utils.c
+C_SRC += $(JD_STM)/stm32/utils.c
 C_SRC += $(JD_STM)/bl/blutils.c
 C_SRC += $(JD_STM)/bl/blpwm.c
 C_SRC += $(JD_STM)/bl/blled.c
