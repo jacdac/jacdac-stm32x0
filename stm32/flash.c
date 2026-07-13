@@ -1,12 +1,12 @@
 #include "jdstm.h"
 
-#if defined(STM32G0) || defined(STM32L)
+#if defined(STM32G0) || defined(STM32C0) || defined(STM32L)
 #define NEW_FLASH 1
 #else
 #define NEW_FLASH 0
 #endif
 
-#ifdef STM32G0
+#if defined(STM32G0) || defined(STM32C0)
 #define FLASH_SR_BSY FLASH_SR_BSY1
 #endif
 

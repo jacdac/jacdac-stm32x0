@@ -8,7 +8,7 @@ static bool adc_calibrated;
 #define ADC1 ADC
 #endif
 
-#if defined(STM32G0) || defined(STM32L)
+#if defined(STM32G0) || defined(STM32C0) || defined(STM32L)
 #define NEW_ADC 1
 #else
 #define NEW_ADC 0
@@ -255,6 +255,12 @@ int32_t adc_read_temp(void) {
     return ((130 - 30) * (r - (TS_CAL1 * 30 / 33))) / 310 + 30;
 #elif defined(STM32L)
     return __LL_ADC_CALC_TEMPERATURE(3300, r, LL_ADC_RESOLUTION_12B);
+#elif defined(STM32C0)
+    // ST disabled __LL_ADC_CALC_TEMPERATURE() on C0 (see stm32c0xx_ll_adc.h); a
+    // real reading needs __LL_ADC_CALC_TEMPERATURE_TYP_PARAMS() with datasheet
+    // avg-slope params. Return a stub until a C0 board needs on-die temperature.
+    (void)r;
+    return 25;
 #else
 #error "no temp"
 #endif

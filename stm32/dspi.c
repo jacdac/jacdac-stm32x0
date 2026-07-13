@@ -267,7 +267,11 @@ void px_init(int light_type) {
     SPI_CLK_ENABLE();
     DMA_CLK_ENABLE();
 
-#ifdef DISABLE_PLL
+#if defined(DISABLE_PLL) && !defined(STM32C0)
+    // On F0/G0, DISABLE_PLL means the core drops to the raw HSI (8/16 MHz), too
+    // slow for WS2812 SPI timing -> this undefined symbol trips the link to force
+    // the issue. C0 has no PLL but still runs HSI48 at 48 MHz, so the 48 MHz
+    // prescaler path below is valid and the tripwire does not apply.
     extern void pll_needed_for_px_init(void);
     pll_needed_for_px_init();
 #endif
@@ -284,7 +288,7 @@ void px_init(int light_type) {
     if (light_type & LIGHT_TYPE_APA_MASK)
         pin_setup_output_af(PIN_ASCK, PIN_AF);
 
-#if defined(STM32G0) || defined(STM32L)
+#if defined(STM32G0) || defined(STM32C0) || defined(STM32L)
     LL_DMA_SetPeriphRequest(DMA1, DMA_CH_TX, LL_DMAMUX_REQ_SPIx_TX);
 #endif
 

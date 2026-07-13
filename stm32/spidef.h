@@ -1,12 +1,12 @@
 #pragma once
 
-#if defined(STM32G031xx) || defined(STM32G030xx)
+#if defined(STM32G031xx) || defined(STM32G030xx) || defined(STM32C031xx)
 #if PIN_ASCK == PA_5 || PIN_ASCK == PA_1
 #define SPI_IDX 1
 #elif PIN_ASCK == PA_0
 #define SPI_IDX 2
 #else
-#error "Please add pin mapping for STM32G0 SPI"
+#error "Please add pin mapping for STM32G0/C0 SPI"
 #endif
 #elif defined(STM32F031x6) || defined(STM32F030x4) || !defined(SPI2)
 #define SPI_IDX 1
@@ -41,7 +41,8 @@
 #if PIN_ASCK == PA_5
 #define PIN_AF LL_GPIO_AF_0
 STATIC_ASSERT(PIN_ASCK == PA_5);
-STATIC_ASSERT(PIN_AMOSI == PA_7 || PIN_AMOSI == PA_2);
+// PA12 is also SPI1_MOSI on AF0 (G0/C0) — used e.g. for WS2812 data output.
+STATIC_ASSERT(PIN_AMOSI == PA_7 || PIN_AMOSI == PA_2 || PIN_AMOSI == PA_12);
 #if SPI_RX
 STATIC_ASSERT(PIN_AMISO == PA_6);
 #endif
@@ -87,7 +88,7 @@ STATIC_ASSERT(PIN_AMISO == -1);
 #error "bad spi IDX"
 #endif
 
-#ifdef STM32G0
+#if defined(STM32G0) || defined(STM32C0)
 #if SPI_RX
 #define DMA_CH_TX LL_DMA_CHANNEL_3
 #define DMA_CH_RX LL_DMA_CHANNEL_2
@@ -143,7 +144,7 @@ static inline void spi_init1(void) {
     // LL_SPI_EnableIT_RXNE(SPIx);
     LL_SPI_EnableIT_ERR(SPIx);
 
-#ifdef STM32G0
+#if defined(STM32G0) || defined(STM32C0)
     LL_DMA_SetPeriphRequest(DMA1, DMA_CH_TX, LL_DMAMUX_REQ_SPIx_TX);
 #endif
     LL_DMA_ConfigTransfer(DMA1, DMA_CH_TX,
@@ -156,7 +157,7 @@ static inline void spi_init1(void) {
                               LL_DMA_MDATAALIGN_BYTE);
 
 #if SPI_RX
-#ifdef STM32G0
+#if defined(STM32G0) || defined(STM32C0)
     LL_DMA_SetPeriphRequest(DMA1, DMA_CH_RX, LL_DMAMUX_REQ_SPIx_RX);
 #endif
     LL_DMA_ConfigTransfer(DMA1, DMA_CH_RX,

@@ -9,7 +9,9 @@
 #define CHANNEL 4
 #define AF LL_GPIO_AF_1
 #endif
-#elif defined(STM32G0)
+#elif defined(STM32G0) || defined(STM32C0)
+// C0 shares the G0 TIM/AF mapping for these pins (verify per-pin AF against the
+// C0 datasheet if a different PIN_BL_LED is used; PB_1 -> TIM3_CH4 AF1 matches).
 #if PIN_BL_LED == PA_1
 #define TIMx TIM2
 #define TIMx_CLK_ENABLE __HAL_RCC_TIM2_CLK_ENABLE

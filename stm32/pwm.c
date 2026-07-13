@@ -7,7 +7,7 @@ struct TimDesc {
 };
 
 static const struct TimDesc tims[] = {
-#ifdef STM32G0
+#if defined(STM32G0) || defined(STM32C0)
 #define APB1ENR APBENR1
 #define APB2ENR APBENR2
     {TIM1, 2, RCC_APBENR2_TIM1EN},   //
@@ -45,7 +45,7 @@ struct PinPWM {
 };
 
 static const struct PinPWM pins[] = {
-#ifdef STM32G0
+#if defined(STM32G0) || defined(STM32C0)
 #ifdef TIM2
     {PA_0, 1, LL_GPIO_AF_2, TIM2}, // rgb led
     {PA_1, 2, LL_GPIO_AF_2, TIM2}, // rgb led
@@ -202,7 +202,7 @@ void jd_pwm_enable(uint8_t pwm, bool enabled) {
         pin_setup_output(pins[pwm].pin);
 }
 
-#ifdef STM32G0
+#if defined(STM32G0) || defined(STM32C0)
 // This kind-of works, but it seems the TIM still only runs when we're not sleeping so we miss quick
 // turns Thus we just stick to software for now.
 uint8_t encoder_init(uint8_t pinA, uint8_t pinB) {
