@@ -87,10 +87,18 @@ static void enable_nrst_pin(void) {
 }
 
 bool clk_is_pll(void) {
+#if defined(STM32C0)
+    // C0 has no PLL; it always runs directly off HSI48.
+    return false;
+#else
     return LL_RCC_GetSysClkSource() == LL_RCC_SYS_CLKSOURCE_PLL;
+#endif
 }
 
 void clk_setup_pll(void) {
+#if defined(STM32C0)
+    // C0 has no PLL; the 48 MHz system clock is set up directly in SystemInit().
+#else
 #if defined(STM32G0)
     // run at 48 MHz for compatibility with F0
     LL_FLASH_SetLatency(LL_FLASH_LATENCY_2);
@@ -125,6 +133,7 @@ void clk_setup_pll(void) {
     LL_RCC_SetSysClkSource(LL_RCC_SYS_CLKSOURCE_PLL);
     while (LL_RCC_GetSysClkSource() != LL_RCC_SYS_CLKSOURCE_STATUS_PLL)
         ;
+#endif // !STM32C0
 }
 
 uint8_t cpu_mhz = HSI_MHZ;
@@ -173,6 +182,26 @@ void SystemInit(void) {
     LL_IOP_GRP1_EnableClock(LL_IOP_GRP1_PERIPH_GPIOA | LL_IOP_GRP1_PERIPH_GPIOB |
                             LL_IOP_GRP1_PERIPH_GPIOC);
     LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_PWR);
+#elif defined(STM32C0)
+    SCB->VTOR = FLASH_BASE; // needed?
+    // C0's SYSCFG lives on APB1 group 2 (RCC_APBENR2), unlike G0's APB2 group 1.
+    LL_APB1_GRP2_EnableClock(LL_APB1_GRP2_PERIPH_SYSCFG);
+    LL_IOP_GRP1_EnableClock(LL_IOP_GRP1_PERIPH_GPIOA | LL_IOP_GRP1_PERIPH_GPIOB |
+                            LL_IOP_GRP1_PERIPH_GPIOC);
+    LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_PWR);
+
+    // C0 has no PLL: it boots on HSI48 but with HSIDIV at reset (= /4 => 12 MHz).
+    // Bring the system clock to the full 48 MHz by running HSI48 undivided. Raise
+    // flash latency first (1 wait state above 24 MHz), then set HSIDIV to /1. HSI
+    // is already the active system clock out of reset.
+    LL_RCC_HSI_Enable();
+    while (LL_RCC_HSI_IsReady() != 1)
+        ;
+    LL_FLASH_SetLatency(LL_FLASH_LATENCY_1);
+    while (LL_FLASH_GetLatency() != LL_FLASH_LATENCY_1)
+        ;
+    LL_FLASH_EnablePrefetch();
+    LL_RCC_SetHSIDiv(LL_RCC_HSI_DIV_1);
 #elif defined(STM32L)
     SCB->VTOR = FLASH_BASE; // needed?
     // LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_SYSCFG); - doesn't have?

@@ -39,6 +39,20 @@
 #define DMA_IRQn DMA1_Ch4_5_DMAMUX1_OVR_IRQn
 #define DMA_Handler DMA1_Ch4_5_DMAMUX1_OVR_IRQHandler
 #define NEW_UART 1
+#elif defined(STM32C0)
+// C031's DMA1 has only 3 channels (1-3); channel 1 is the WS2812 SPI output, so
+// the half-duplex UART uses channels 2 (TX) and 3 (RX), which share one IRQ.
+#define DMA_IRQn DMA1_Channel2_3_IRQn
+#define DMA_Handler DMA1_Channel2_3_IRQHandler
+#define DMA_CH_TX LL_DMA_CHANNEL_2
+#define DMA_CH_RX LL_DMA_CHANNEL_3
+#define DMA_ISR_TC_TX DMA_ISR_TCIF2
+#define DMA_ISR_TE_TX DMA_ISR_TEIF2
+#define DMA_ISR_TC_RX DMA_ISR_TCIF3
+#define DMA_ISR_TE_RX DMA_ISR_TEIF3
+#define DMA_CLEAR_TX() LL_DMA_ClearFlag_GI2(DMAx)
+#define DMA_CLEAR_RX() LL_DMA_ClearFlag_GI3(DMAx)
+#define NEW_UART 1
 #elif defined(STM32L4)
 #define DMA_IRQn DMA2_Channel3_IRQn
 #define DMA_IRQn_2 DMA2_Channel5_IRQn
@@ -76,6 +90,16 @@
 #define DMAx DMA1
 #endif
 
+// Clearing the DMA global-interrupt flag is channel-specific; parameterized so
+// each family targets its own TX/RX channels. Defaults preserve the historical
+// GI3(TX)/GI5(RX) behavior for the families that relied on it.
+#ifndef DMA_CLEAR_TX
+#define DMA_CLEAR_TX() LL_DMA_ClearFlag_GI3(DMAx)
+#endif
+#ifndef DMA_CLEAR_RX
+#define DMA_CLEAR_RX() LL_DMA_ClearFlag_GI5(DMAx)
+#endif
+
 // DMA Channel 4 - TX
 // DMA Channel 5 - RX
 
@@ -102,10 +126,10 @@ static void uartOwnsPin(int doesIt) {
 }
 
 void uart_disable() {
-    LL_DMA_ClearFlag_GI5(DMAx);
+    DMA_CLEAR_RX();
     LL_DMA_DisableChannel(DMAx, DMA_CH_RX);
 
-    LL_DMA_ClearFlag_GI3(DMAx);
+    DMA_CLEAR_TX();
     LL_DMA_DisableChannel(DMAx, DMA_CH_TX);
 
     LL_USART_Disable(USARTx);
@@ -132,7 +156,7 @@ void DMA_Handler(void) {
     }
 
     if (isr & (DMA_ISR_TC_TX | DMA_ISR_TE_TX)) {
-        LL_DMA_ClearFlag_GI3(DMAx);
+        DMA_CLEAR_TX();
         LL_DMA_DisableChannel(DMAx, DMA_CH_TX);
 
         int errCode = 0;
@@ -204,7 +228,13 @@ static void USART_UART_Init(void) {
 #error "PLL not supported"
 #endif
 #elif USART_IDX == 1
+#if defined(STM32C0)
+    // C0 has no plain "HSI" USART source; SYSCLK is HSI48 at 48 MHz (HSIDIV=1),
+    // so BRR = HSI_MHZ (48) still yields 1 Mbaud at 16x oversampling.
+    LL_RCC_SetUSARTClockSource(LL_RCC_USART1_CLKSOURCE_SYSCLK);
+#else
     LL_RCC_SetUSARTClockSource(LL_RCC_USART1_CLKSOURCE_HSI);
+#endif
     __HAL_RCC_USART1_CLK_ENABLE();
 #elif USART_IDX == 4
     LL_RCC_SetUSARTClockSource(LL_RCC_UART4_CLKSOURCE_HSI);

@@ -7,6 +7,8 @@
 #include "stm32f0.h"
 #elif defined(STM32G0)
 #include "stm32g0.h"
+#elif defined(STM32C0)
+#include "stm32c0.h"
 #else
 #error "invalid CPU"
 #endif

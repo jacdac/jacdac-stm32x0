@@ -31,6 +31,11 @@ static ctx_t ctx_;
 #define RTC_IRQn RTC_TAMP_IRQn
 #define RTC_IRQHandler RTC_TAMP_IRQHandler
 #define EXTI_LINE LL_EXTI_LINE_19
+#elif defined(STM32C0)
+// C0 has a dedicated RTC_IRQn / RTC_IRQHandler (not muxed with TAMP like G0),
+// routed through EXTI line 19. C0 uses the new EXTI IP (separate rising/falling
+// pending), so the real LL_EXTI_ClearRisingFlag_0_31 is kept (no F0-style alias).
+#define EXTI_LINE LL_EXTI_LINE_19
 #elif defined(STM32L)
 #define RTC_IRQn RTC_Alarm_IRQn
 #define RTC_IRQHandler RTC_Alarm_IRQHandler
@@ -163,7 +168,7 @@ void RTC_IRQHandler(void) {
 }
 
 static void rtc_config(uint8_t p0, uint16_t p1) {
-#ifdef STM32G0
+#if defined(STM32G0) || defined(STM32C0)
     LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_PWR | LL_APB1_GRP1_PERIPH_RTC);
 #elif defined(STM32WL)
     LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_RTCAPB);
@@ -174,7 +179,11 @@ static void rtc_config(uint8_t p0, uint16_t p1) {
     LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_PWR);
 #endif
 
+#ifndef STM32C0
+    // C0 has no DBP bit / backup-domain write protection, and no
+    // LL_PWR_EnableBkUpAccess(); RTC/RCC CSR1 bits are directly writable.
     LL_PWR_EnableBkUpAccess();
+#endif
 
     LL_RCC_ForceBackupDomainReset();
     LL_RCC_ReleaseBackupDomainReset();
@@ -335,6 +344,9 @@ void rtc_sleep(bool forceShallow) {
     rtc_set(&ctx_, usec, f);
 #if defined(STM32G0) || defined(STM32L)
     LL_PWR_SetPowerMode(LL_PWR_MODE_STOP1);
+#elif defined(STM32C0)
+    // C0 has a single Stop mode (STOP0); no STOP1 / STOP_LPREGU variants.
+    LL_PWR_SetPowerMode(LL_PWR_MODE_STOP0);
 #else
     LL_PWR_SetPowerMode(LL_PWR_MODE_STOP_LPREGU);
 #endif

@@ -12,7 +12,7 @@ static void _check_line(int ln) {
     callbacks[ln]();
 }
 
-#if defined(STM32G0)
+#if defined(STM32G0) || defined(STM32C0)
 #define EXTI_LINES() (EXTI->FPR1 | EXTI->RPR1)
 #elif defined(STM32L)
 #define EXTI_LINES() (EXTI->PR1)
@@ -85,7 +85,7 @@ void EXTI4_15_IRQHandler(void) {
 }
 #endif
 
-#ifdef STM32G0
+#if defined(STM32G0) || defined(STM32C0)
 static const uint32_t cfgs[] = {LL_EXTI_CONFIG_PORTA, LL_EXTI_CONFIG_PORTB, LL_EXTI_CONFIG_PORTC};
 #endif
 
@@ -96,7 +96,7 @@ void exti_set_callback(uint8_t pin, cb_t callback, uint32_t flags) {
         JD_PANIC();
 #if defined(STM32F0) || defined(STM32L)
     extiport = pin >> 4;
-#elif defined(STM32G0)
+#elif defined(STM32G0) || defined(STM32C0)
     extiport = cfgs[pin >> 4];
 #else
 #error "exti?"

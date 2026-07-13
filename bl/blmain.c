@@ -48,6 +48,10 @@ int main(void) {
 
 #ifdef STM32G0
     LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_TIM17 | LL_APB2_GRP1_PERIPH_ADC);
+#elif defined(STM32C0)
+    // C0 groups TIM17/ADC under APB1 group 2 (APBENR2), and its single ADC is
+    // named ADC (not ADC1).
+    LL_APB1_GRP2_EnableClock(LL_APB1_GRP2_PERIPH_TIM17 | LL_APB1_GRP2_PERIPH_ADC);
 #else
     LL_APB1_GRP2_EnableClock(LL_APB1_GRP2_PERIPH_TIM17 | LL_APB1_GRP2_PERIPH_ADC1);
 #endif
