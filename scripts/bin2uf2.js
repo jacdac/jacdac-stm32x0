@@ -26,13 +26,18 @@ const familyID = dev_class
 // boot damaged application.
 let bootBlockSize = 1024
 const extTags = fetchExtensionTags()
+// Bytes of firmware per UF2 block. The host (jacdac-ts, src/jdom/flashing.ts)
+// copies each block into a single flash page, so a block must never span two
+// pages: use the usual 256 B unless the flash page is smaller, as on PY32 (128 B
+// pages). For ST parts (1-2 KB pages) this is 256 and the output is unchanged.
+const payloadSize = Math.min(256, bootBlockSize)
 const app_reset_offset = 13 * 4
 
 const flags =
     0x00002000 | // familyID present
     0x00008000  // ext-tags present
 const len = (buf.length + bootBlockSize) & ~(bootBlockSize - 1)
-const numBlocks = (bootBlockSize + len) >> 8
+const numBlocks = (bootBlockSize + len) / payloadSize
 const outp = []
 
 
@@ -77,13 +82,13 @@ function addBlock(pos, buf) {
     bl.writeUInt32LE(UF2_MAGIC_START1, 4)
     bl.writeUInt32LE(flags, 8)
     bl.writeUInt32LE(startAddr + pos, 12)
-    bl.writeUInt32LE(256, 16)
+    bl.writeUInt32LE(payloadSize, 16)
     bl.writeUInt32LE(outp.length, 20)
     bl.writeUInt32LE(numBlocks, 24)
     bl.writeUInt32LE(familyID, 28) // reserved
-    for (let i = 0; i < 256; ++i)
+    for (let i = 0; i < payloadSize; ++i)
         bl[i + 32] = buf ? (buf[pos + i] || 0x00) : 0xff
-    bl.set(extTags, 32 + 256)
+    bl.set(extTags, 32 + payloadSize) // the host reads ext tags right after the payload
     bl.writeUInt32LE(UF2_MAGIC_END, 512 - 4)
     outp.push(bl)
 
@@ -92,11 +97,11 @@ function addBlock(pos, buf) {
 
 const app_reset = buf.readUInt32LE(app_reset_offset)
 buf.writeUInt32LE(0, app_reset_offset)
-for (let pos = 0; pos < len; pos += 256) {
+for (let pos = 0; pos < len; pos += payloadSize) {
     addBlock(pos, buf)
 }
 buf.writeUInt32LE(app_reset, app_reset_offset)
-for (let pos = 0; pos < bootBlockSize; pos += 256) {
+for (let pos = 0; pos < bootBlockSize; pos += payloadSize) {
     addBlock(pos, buf)
 }
 
