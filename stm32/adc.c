@@ -18,6 +18,76 @@ static bool adc_calibrated;
 static bool configured_fixed = false;
 #endif
 
+#if defined(PY32F0)
+// PY32's ADC is the F0 design (CHSELR sequencer, so NEW_ADC == 0) minus two
+// features: there is no ADRDY flag, and no ADDIS (disable takes effect at once).
+// Puya's HAL enables the ADC and then waits ADC_STAB_DELAY_US (1 us) instead of
+// polling ADRDY; the shim below does the same, so the shared code is unchanged.
+// Calibration (ADCAL with the ADC disabled) is the same as F0's.
+#define LL_ADC_IsDisableOngoing(adc) 0
+static inline uint32_t py32_adc_wait_ready(void) {
+    target_wait_us(1); // ADC_STAB_DELAY_US in Puya's HAL
+    return 1;
+}
+#define LL_ADC_IsActiveFlag_ADRDY(adc) py32_adc_wait_ready()
+// PY32's shortest sampling time is 3.5 cycles (ST's is 1.5). Only used to seed the
+// RNG from temperature-sensor noise, where "shortest available" is what matters.
+#define LL_ADC_SAMPLINGTIME_1CYCLE_5 LL_ADC_SAMPLINGTIME_3CYCLES_5
+// ADC clock: PCLK/4 on every PY32 part.
+//  - F030 (48 MHz): 12 MHz, the datasheet MAXIMUM for VCC 2.3-5.5 V (V2.8,
+//    table 5-25; 6 MHz below 2.3 V). The ST default of PCLK/2 would be 24 MHz,
+//    twice the limit.
+//  - F003/F002A (24 MHz): 6 MHz. PCLK/2 would be within the limit, but the F003
+//    needs >= 20 us of sampling for the temperature sensor (V2.7, table 5-24; the
+//    F030 needs 15 us), and the longest sampling time, 239.5 cycles, is only
+//    19.96 us at 12 MHz. At 6 MHz it's 40 us.
+#define ADC_CLOCK_CFG LL_ADC_CLOCK_SYNC_PCLK_DIV4
+// Temperature sensor start-up: 70 us typical, 120 us max (datasheet table 5-27).
+// Puya's LL constant is only 10 us, so readings could be taken before the sensor
+// settles. Use the datasheet figure.
+#undef LL_ADC_DELAY_TEMPSENSOR_STAB_US
+#define LL_ADC_DELAY_TEMPSENSOR_STAB_US 120U
+// Puya's LL_ADC_Disable() does a dummy start/stop conversion inside a bare
+// __disable_irq()/__enable_irq(). PRIMASK is one bit, not a counter, so a caller
+// that had interrupts off gets them turned back on mid-critical-section (ST's
+// version never touches PRIMASK). This is the same sequence, copied from
+// py32f0xx_ll_adc.h (SDK v1.5.0, BSD-3), with the caller's state restored instead.
+static inline ErrorStatus py32_adc_disable(ADC_TypeDef *ADCx) {
+    ErrorStatus status = SUCCESS;
+    uint32_t tmpCFGR1 = ADCx->CFGR1;
+    __IO uint32_t timeout_cpu_cycles = 0U;
+
+    if (LL_ADC_IsEnabled(ADCx) == 1U) {
+        LL_ADC_REG_SetTriggerSource(ADCx, LL_ADC_REG_TRIG_SOFTWARE);
+        if (LL_ADC_REG_IsConversionOngoing(ADCx) != 0U) {
+            if (LL_ADC_REG_IsStopConversionOngoing(ADCx) == 0U)
+                LL_ADC_REG_StopConversion(ADCx);
+        } else {
+            ADCx->CFGR1 |= (0x7 << 6);
+            ADCx->CFGR1 |= (0x3 << 10);
+            uint32_t primask = __get_PRIMASK();
+            __disable_irq();
+            LL_ADC_REG_StartConversion(ADCx);
+            LL_ADC_REG_StopConversion(ADCx);
+            __set_PRIMASK(primask);
+        }
+        timeout_cpu_cycles = LL_ADC_TIMEOUT_STOP_CONVERSION_CPU_CYCLES;
+        while (LL_ADC_REG_IsStopConversionOngoing(ADCx) == 1U)
+            if (timeout_cpu_cycles-- == 0U)
+                status = ERROR;
+        timeout_cpu_cycles = LL_ADC_TIMEOUT_DISABLE_CPU_CYCLES;
+        while (LL_ADC_IsEnabled(ADCx) == 1U)
+            if (timeout_cpu_cycles-- == 0U)
+                status = ERROR;
+        ADCx->CFGR1 = tmpCFGR1;
+    }
+    return status;
+}
+#define LL_ADC_Disable(adc) py32_adc_disable(adc)
+#else
+#define ADC_CLOCK_CFG LL_ADC_CLOCK_SYNC_PCLK_DIV2
+#endif
+
 uint16_t adc_convert(void) {
     if ((LL_ADC_IsEnabled(ADC1) == 1) && (LL_ADC_IsDisableOngoing(ADC1) == 0) &&
         (LL_ADC_REG_IsConversionOngoing(ADC1) == 0)) {
@@ -129,7 +199,7 @@ uint32_t bl_adc_random_seed(void) {
     LL_ADC_REG_SetSequencerConfigurable(ADC1, LL_ADC_REG_SEQ_CONFIGURABLE);
 #endif
 
-    ADC1->CFGR2 = LL_ADC_CLOCK_SYNC_PCLK_DIV2;
+    ADC1->CFGR2 = ADC_CLOCK_CFG;
 
 #if NEW_ADC
     LL_ADC_REG_SetSequencerRanks(ADC1, LL_ADC_REG_RANK_1, LL_ADC_CHANNEL_TEMPSENSOR);
@@ -178,7 +248,7 @@ void adc_init_random(void) {
     LL_ADC_REG_SetSequencerConfigurable(ADC1, LL_ADC_REG_SEQ_CONFIGURABLE);
 #endif
 
-    ADC1->CFGR2 = LL_ADC_CLOCK_SYNC_PCLK_DIV2;
+    ADC1->CFGR2 = ADC_CLOCK_CFG;
 
     set_sampling_time(LL_ADC_SAMPLINGTIME_1CYCLE_5, LL_ADC_CHANNEL_TEMPSENSOR); // get maximum noise
 
@@ -203,7 +273,14 @@ void adc_init_random(void) {
 static const uint32_t channels_PA[] = {
     LL_ADC_CHANNEL_0, LL_ADC_CHANNEL_1,  LL_ADC_CHANNEL_2,  LL_ADC_CHANNEL_3, LL_ADC_CHANNEL_4,
     LL_ADC_CHANNEL_5, LL_ADC_CHANNEL_6,  LL_ADC_CHANNEL_7,  NO_CHANNEL,       NO_CHANNEL,
+#if defined(PY32F0)
+    // PY32 has no ADC input on PA11/PA12 (G0's ADC_IN15/16). PA0-PA7 are
+    // ADC_IN0-7 and PB0/PB1 are ADC_IN8/9, as below; ADC_IN11/12 are internal
+    // (temperature sensor / VREFINT).
+    NO_CHANNEL,       NO_CHANNEL,        NO_CHANNEL,
+#else
     NO_CHANNEL,       LL_ADC_CHANNEL_15, LL_ADC_CHANNEL_16,
+#endif
 };
 
 static const uint32_t channels_PB[] = {
@@ -229,6 +306,10 @@ static const uint32_t channels_PB[] = {
 int32_t adc_read_temp(void) {
 #ifdef STM32L4
     set_sampling_time(LL_ADC_SAMPLINGTIME_247CYCLES_5, LL_ADC_CHANNEL_TEMPSENSOR);
+#elif defined(PY32F0)
+    // 239.5 cycles: 20 us at 12 MHz on the F030 (datasheet minimum 15 us), 40 us
+    // at 6 MHz on the F003 (minimum 20 us). See ADC_CLOCK_CFG.
+    set_sampling_time(LL_ADC_SAMPLINGTIME_239CYCLES_5, LL_ADC_CHANNEL_TEMPSENSOR);
 #elif NEW_ADC
     set_sampling_time(LL_ADC_SAMPLINGTIME_160CYCLES_5, LL_ADC_CHANNEL_TEMPSENSOR);
 #else
@@ -254,6 +335,10 @@ int32_t adc_read_temp(void) {
     // 30/33 is because the TS_CAL1 is taken at 3.0V VCC and we run at 3.3V
     return ((130 - 30) * (r - (TS_CAL1 * 30 / 33))) / 310 + 30;
 #elif defined(STM32L)
+    return __LL_ADC_CALC_TEMPERATURE(3300, r, LL_ADC_RESOLUTION_12B);
+#elif defined(PY32F0)
+    // PY32 has factory calibration (TS_CAL1 @ 30 C at 0x1FFF0F14, TS_CAL2 @ 85 C at
+    // 0x1FFF0F18, both at Vref+ 3.3 V), and Puya's LL macro uses it. We run at 3.3 V.
     return __LL_ADC_CALC_TEMPERATURE(3300, r, LL_ADC_RESOLUTION_12B);
 #elif defined(STM32C0)
     // ST disabled __LL_ADC_CALC_TEMPERATURE() on C0 (see stm32c0xx_ll_adc.h); a

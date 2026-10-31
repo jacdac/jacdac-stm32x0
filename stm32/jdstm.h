@@ -11,6 +11,8 @@
 #include "stm32g0.h"
 #elif defined(STM32C0)
 #include "stm32c0.h"
+#elif defined(PY32F0)
+#include "py32f0.h"
 #elif defined(STM32WL)
 #include "stm32wl.h"
 #elif defined(STM32L4)
@@ -67,10 +69,11 @@ void usb_init(void);
 
 // The DMA ISR/IFCR layout is the same across these families (4 flag bits per
 // channel), but the LL_DMA_CHANNEL_x constants differ: G0/L are 0-based
-// (LL_DMA_CHANNEL_1 == 0) so the flag shifts by ch*4, while F0 and C0 are
-// 1-based (LL_DMA_CHANNEL_1 == 1) and must shift by (ch-1)*4. C0 therefore
-// belongs in the #else branch below with F0 (NOT with G0) — placing it with G0
-// reads/clears the wrong channel's flags and hangs on the first DMA IRQ.
+// (LL_DMA_CHANNEL_1 == 0) so the flag shifts by ch*4, while F0, C0 and PY32F0
+// are 1-based (LL_DMA_CHANNEL_1 == 1) and must shift by (ch-1)*4. C0 and PY32F0
+// therefore belong in the #else branch below with F0 (NOT with G0) — placing
+// them with G0 reads/clears the wrong channel's flags and hangs on the first DMA
+// IRQ.
 #if defined(STM32G0) || defined(STM32L)
 static inline void dma_clear_flag(int ch, int flag) {
     WRITE_REG(DMA1->IFCR, flag << (ch*4));

@@ -20,6 +20,45 @@
 #error "bad usart"
 #endif
 
+// Register access. PY32's USART is STM32F1-style (see py32f0.h): SR/DR, with no
+// ISR, ICR, RDR/TDR, BUSY, REACK or TEACK, and errors clear by reading SR then DR.
+//
+// "Line busy" stands in for ST's USART_ISR_BUSY, which stays set while a frame is
+// being received. The pin alone isn't enough: mid-frame it is high for most data
+// and stop bits, so a bootloader that missed the frame's break would see an idle
+// line and could start transmitting into it. So: busy if the pin is low (a break
+// or a 0 bit), OR a byte has arrived and no idle line has been detected since
+// (RXNE set, IDLE not yet set). IDLE rises one character time after the frame
+// ends, so this can't stick. py32_usart_clear_errors() clears both flags.
+#if defined(PY32F0)
+#define UART_STATUS() (USARTx->SR)
+#define UART_FE USART_SR_FE
+#define UART_RXNE USART_SR_RXNE
+#define UART_TXE USART_SR_TXE
+#define UART_READ() (USARTx->DR)
+#define UART_WRITE(b) (USARTx->DR = (b))
+#define UART_LINE_BUSY(isr)                                                                        \
+    (!(PIN_PORT->IDR & PIN_PIN) || (((isr) & (USART_SR_RXNE | USART_SR_IDLE)) == USART_SR_RXNE))
+#define UART_CLEAR_ERRORS() py32_usart_clear_errors(USARTx)
+#define UART_WAIT_REACK() ((void)0)
+#define UART_WAIT_TEACK() ((void)0)
+#else
+#define UART_STATUS() (USARTx->ISR)
+#define UART_FE USART_ISR_FE
+#define UART_RXNE USART_ISR_RXNE
+#define UART_TXE USART_ISR_TXE
+#define UART_READ() (USARTx->RDR)
+#define UART_WRITE(b) (USARTx->TDR = (b))
+#define UART_LINE_BUSY(isr) ((isr)&USART_ISR_BUSY)
+#define UART_CLEAR_ERRORS() (USARTx->ICR = USART_ISR_FE | USART_ISR_NE | USART_ISR_ORE)
+#define UART_WAIT_REACK()                                                                          \
+    while (!(LL_USART_IsActiveFlag_REACK(USARTx)))                                                 \
+        ;
+#define UART_WAIT_TEACK()                                                                          \
+    while (!(LL_USART_IsActiveFlag_TEACK(USARTx)))                                                 \
+        ;
+#endif
+
 // This is extracted to a function to make sure the compiler doesn't
 // insert stuff between checking the input pin and setting the mode.
 // This results in a collision window of around 90ns
@@ -44,10 +83,9 @@ static void rx_setup(void) {
     uartOwnsPin();
     LL_USART_DisableDirectionTx(USARTx);
     LL_USART_EnableDirectionRx(USARTx);
-    USARTx->ICR = USART_ISR_FE | USART_ISR_NE | USART_ISR_ORE; // clear error flags before we start
+    UART_CLEAR_ERRORS(); // clear error flags before we start
     LL_USART_Enable(USARTx);
-    while (!(LL_USART_IsActiveFlag_REACK(USARTx)))
-        ;
+    UART_WAIT_REACK();
 }
 
 void uart_init(ctx_t *ctx) {
@@ -61,9 +99,17 @@ void uart_init(ctx_t *ctx) {
     LL_GPIO_SetPinSpeed(PIN_PORT, PIN_PIN, LL_GPIO_SPEED_FREQ_HIGH);
     uartDoesntOwnPin();
 
+#if defined(PY32F0)
+    // 16x oversampling: PY32 keeps OVER8 in CR3 (bit 11), so ORing
+    // LL_USART_OVERSAMPLING_8 into CR1 would set WAKE instead and leave the bus at
+    // half speed. BRR = CPU_MHZ (48) is exactly 1 Mbaud at 16x.
+    USARTx->CR1 = LL_USART_DATAWIDTH_8B | LL_USART_PARITY_NONE | LL_USART_DIRECTION_TX;
+    USARTx->BRR = CPU_MHZ; // ->1MHz (16x oversampling)
+#else
     USARTx->CR1 = LL_USART_DATAWIDTH_8B | LL_USART_PARITY_NONE | LL_USART_OVERSAMPLING_8 |
                   LL_USART_DIRECTION_TX;
     USARTx->BRR = CPU_MHZ * 2; // ->1MHz
+#endif
 
 #ifdef LL_USART_PRESCALER_DIV1
     LL_USART_SetPrescaler(USARTx, LL_USART_PRESCALER_DIV1);
@@ -80,10 +126,10 @@ void uart_disable(ctx_t *ctx) {
 }
 
 int uart_rx(ctx_t *ctx, void *data, uint32_t maxbytes) {
-    uint32_t isr = USARTx->ISR;
+    uint32_t isr = UART_STATUS();
 
-    if (!ctx->low_detected && !(isr & USART_ISR_FE)) {
-        if (isr & USART_ISR_BUSY)
+    if (!ctx->low_detected && !(isr & UART_FE)) {
+        if (UART_LINE_BUSY(isr))
             return RX_LINE_BUSY;
         return RX_LINE_IDLE;
     }
@@ -91,8 +137,8 @@ int uart_rx(ctx_t *ctx, void *data, uint32_t maxbytes) {
     ctx->low_detected = 0;
 
     // wait for BUSY to be cleared - ie the low pulse has ended
-    while (isr & USART_ISR_BUSY)
-        isr = USARTx->ISR;
+    while (UART_LINE_BUSY(isr))
+        isr = UART_STATUS();
 
     uart_post_rx(ctx); // clear errors
 
@@ -100,12 +146,20 @@ int uart_rx(ctx_t *ctx, void *data, uint32_t maxbytes) {
     int32_t delaycnt = -10 * CPU_MHZ; // allow a bit more delay at the start
     LOG0_PULSE();
     while (maxbytes > 0) {
-        isr = USARTx->ISR;
-        if (isr & USART_ISR_RXNE) {
-            *dp++ = USARTx->RDR;
+        isr = UART_STATUS();
+#if defined(PY32F0)
+        // The next frame's break sets FE and RXNE together, and on F1-style parts
+        // reading DR after this SR read clears FE. Test FE first, or the break is
+        // stored as a data byte and the loop runs on to the timeout (ST keeps FE
+        // until ICR is written, so it exits on the next pass).
+        if (isr & UART_FE)
+            break;
+#endif
+        if (isr & UART_RXNE) {
+            *dp++ = UART_READ();
             maxbytes--;
             delaycnt = 0;
-        } else if (isr & USART_ISR_FE || delaycnt > 4 * CPU_MHZ) {
+        } else if (isr & UART_FE || delaycnt > 4 * CPU_MHZ) {
             break;
         } else {
             delaycnt++;
@@ -117,9 +171,9 @@ int uart_rx(ctx_t *ctx, void *data, uint32_t maxbytes) {
 }
 
 void uart_post_rx(ctx_t *ctx) {
-    (void)USARTx->RDR;
-    USARTx->ICR = USART_ISR_FE | USART_ISR_NE | USART_ISR_ORE;
-    (void)USARTx->RDR;
+    (void)UART_READ();
+    UART_CLEAR_ERRORS();
+    (void)UART_READ();
 }
 
 int uart_tx(ctx_t *ctx, const void *data, uint32_t numbytes) {
@@ -140,19 +194,18 @@ int uart_tx(ctx_t *ctx, const void *data, uint32_t numbytes) {
     uartOwnsPin();
     LL_USART_DisableDirectionRx(USARTx);
     LL_USART_EnableDirectionTx(USARTx);
-    USARTx->ICR = USART_ISR_FE | USART_ISR_NE | USART_ISR_ORE; // clear error flags before we start
+    UART_CLEAR_ERRORS(); // clear error flags before we start
     LL_USART_Enable(USARTx);
-    while (!(LL_USART_IsActiveFlag_TEACK(USARTx)))
-        ;
+    UART_WAIT_TEACK();
 
     const uint8_t *sp = data;
     target_wait_us(40);
 
     while (numbytes > 0) {
-        uint32_t isr = USARTx->ISR;
-        if (isr & USART_ISR_TXE) {
+        uint32_t isr = UART_STATUS();
+        if (isr & UART_TXE) {
             numbytes--;
-            USARTx->TDR = *sp++;
+            UART_WRITE(*sp++);
         }
     }
 

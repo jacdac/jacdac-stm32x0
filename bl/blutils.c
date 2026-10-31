@@ -16,7 +16,10 @@ void target_wait_cycles(int n) {
 }
 
 void target_wait_us(uint32_t n) {
-#if defined(STM32G0) || defined(STM32C0) || defined(STM32F0) || defined(STM32L)
+#if defined(STM32G0) || defined(STM32C0) || defined(STM32F0) || defined(STM32L) ||          \
+    defined(PY32F0)
+    // 4 cycles per loop iteration (see the asm above); CPU_MHZ is 48 on PY32
+    // because the bootloader shares init.c's SystemInit().
     n = n * CPU_MHZ >> 2;
 #else
 #error "define clock rate"

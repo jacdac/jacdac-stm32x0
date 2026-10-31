@@ -20,8 +20,10 @@ void target_wait_cycles(int n) {
 }
 
 void target_wait_us(uint32_t n) {
-#if defined(STM32G0) || defined(STM32C0) || defined(STM32F0)
-    // C0 is the same Cortex-M0+ at 48 MHz as G0; busy-loop timing matches.
+#if defined(STM32G0) || defined(STM32C0) || defined(STM32F0) || defined(PY32F0)
+    // C0 and PY32 are the same Cortex-M0+ at 48 MHz as G0; busy-loop timing
+    // matches. (PY32 runs 1 flash wait state at 48 MHz like the others; confirm the
+    // loop timing on hardware against a scope.)
     n = n * (cpu_mhz >> 2);
 #elif defined(STM32L)
     n = n * (cpu_mhz >> 3);

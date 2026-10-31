@@ -20,8 +20,17 @@ void SysTick_Handler(void) {}
 #define OPTR_MODE1 0x2
 #define OPTR_MODE_LEGACY 0x3
 
+// PY32: the option-byte rewrite below is skipped. PY32's NRST_MODE is a single
+// bit (OPTR bit 14, vs two on G0) and Puya's option-byte programming sequence
+// differs; getting either wrong here would rewrite option bytes on every boot, or
+// disable the reset pin. PY32 parts keep their factory default (PF2 as NRST; verify
+// on hardware). Fail loudly rather than silently ignore a board asking for GPIO.
+#if defined(PY32F0) && defined(RESET_AS_GPIO)
+#error "RESET_AS_GPIO is not implemented on PY32 yet (see enable_nrst_pin in init.c)"
+#endif
+
 static void enable_nrst_pin(void) {
-#ifdef FLASH_OPTR_NRST_MODE
+#if defined(FLASH_OPTR_NRST_MODE) && !defined(PY32F0)
 #define FLASH_KEY1 0x45670123U
 #define FLASH_KEY2 0xCDEF89ABU
 
@@ -90,14 +99,26 @@ bool clk_is_pll(void) {
 #if defined(STM32C0)
     // C0 has no PLL; it always runs directly off HSI48.
     return false;
+#elif defined(PY32F0)
+#if PY32_HAS_PLL
+    // The F030 runs from its PLL (fixed x2). GetSysClkSource() returns the SWS
+    // *status* bits, so compare with the STATUS constant; the SW *selector*
+    // constant (used by the #else below) never matches. That comparison is also
+    // wrong on ST parts, but nothing calls this today.
+    return LL_RCC_GetSysClkSource() == LL_RCC_SYS_CLKSOURCE_STATUS_PLL;
+#else
+    // F003/F002A have no PLL (and no PLL constants in Puya's headers).
+    return false;
+#endif
 #else
     return LL_RCC_GetSysClkSource() == LL_RCC_SYS_CLKSOURCE_PLL;
 #endif
 }
 
 void clk_setup_pll(void) {
-#if defined(STM32C0)
-    // C0 has no PLL; the 48 MHz system clock is set up directly in SystemInit().
+#if defined(STM32C0) || defined(PY32F0)
+    // C0 has no PLL, and PY32 runs its PLL at a fixed x2 that is never switched at
+    // runtime: in both cases the 48 MHz system clock is set up once in SystemInit().
 #else
 #if defined(STM32G0)
     // run at 48 MHz for compatibility with F0
@@ -135,6 +156,16 @@ void clk_setup_pll(void) {
         ;
 #endif // !STM32C0
 }
+
+#if defined(PY32F0)
+// Puya's GCC startup (from their Embedded IDE templates) branches to `entry`
+// where ST's branches to `main`. The vendored startup is kept byte-for-byte, so
+// provide the symbol here; init.c is linked into both the app and the bootloader.
+int main(void);
+void entry(void) {
+    main();
+}
+#endif
 
 uint8_t cpu_mhz = HSI_MHZ;
 
@@ -202,6 +233,46 @@ void SystemInit(void) {
         ;
     LL_FLASH_EnablePrefetch();
     LL_RCC_SetHSIDiv(LL_RCC_HSI_DIV_1);
+#elif defined(PY32F0)
+    SCB->VTOR = FLASH_BASE;
+    // PY32's SYSCFG and PWR sit on APB1 group 2 and group 1 respectively; GPIO is
+    // on the IOP bus as on G0/C0. There is no GPIOC; the third port is GPIOF.
+    LL_APB1_GRP2_EnableClock(LL_APB1_GRP2_PERIPH_SYSCFG);
+    LL_IOP_GRP1_EnableClock(LL_IOP_GRP1_PERIPH_GPIOA | LL_IOP_GRP1_PERIPH_GPIOB |
+                            LL_IOP_GRP1_PERIPH_GPIOF);
+    LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_PWR);
+
+    // PY32 boots on HSI at 8 MHz. Target: a fixed HSI_MHZ, i.e. 48 MHz on the
+    // F030 (HSI 24 MHz x the PLL's fixed x2) or 24 MHz on the F003/F002A (HSI
+    // 24 MHz directly; no PLL). See py32f0.h for why it never changes at runtime.
+    // 1. HSI to 24 MHz, with Puya's factory trim for that setting. The macro
+    //    reads the trim from the info block at 0x1FFF0F10.
+    LL_RCC_HSI_SetCalibFreq(LL_RCC_HSICALIBRATION_24MHz);
+    while (LL_RCC_HSI_IsReady() != 1)
+        ;
+    // 2. AHB and APB undivided: the USART is clocked from PCLK, and BRR = HSI_MHZ
+    //    assumes PCLK equals the system clock.
+    LL_RCC_SetAHBPrescaler(LL_RCC_SYSCLK_DIV_1);
+    LL_RCC_SetAPB1Prescaler(LL_RCC_APB1_DIV_1);
+#if PY32_HAS_PLL
+    // 3. One flash wait state is required above 24 MHz; set it BEFORE raising the
+    //    clock. (PY32 has no prefetch control, so no EnablePrefetch here.)
+    LL_FLASH_SetLatency(LL_FLASH_LATENCY_1);
+    while (LL_FLASH_GetLatency() != LL_FLASH_LATENCY_1)
+        ;
+    // 4. PLL from HSI (the x2 is fixed), then switch SYSCLK to it.
+    LL_RCC_PLL_SetMainSource(LL_RCC_PLLSOURCE_HSI);
+    LL_RCC_PLL_Enable();
+    while (LL_RCC_PLL_IsReady() != 1)
+        ;
+    LL_RCC_SetSysClkSource(LL_RCC_SYS_CLKSOURCE_PLL);
+    while (LL_RCC_GetSysClkSource() != LL_RCC_SYS_CLKSOURCE_STATUS_PLL)
+        ;
+#else
+    // 3. 24 MHz needs no flash wait state. SYSCLK is already HSISYS out of reset
+    //    and HSI is now at 24 MHz, so there is nothing to switch.
+    LL_FLASH_SetLatency(LL_FLASH_LATENCY_0);
+#endif
 #elif defined(STM32L)
     SCB->VTOR = FLASH_BASE; // needed?
     // LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_SYSCFG); - doesn't have?
