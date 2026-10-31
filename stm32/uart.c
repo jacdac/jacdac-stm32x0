@@ -203,6 +203,16 @@ void uart_disable() {
     // pulse_log_pin();
 }
 
+#ifdef PY32_TX_CAPTURE
+// Second stage: the end of the captured frame, sampled while DMA_Handler waits
+// for TC, with SysTick marks: handler entry, TC seen, break start, break end.
+#define CAP2_N 400
+uint8_t py32_cap2[CAP2_N];
+uint32_t py32_cap2_mark[4];
+volatile uint16_t py32_cap2_len;
+volatile uint8_t py32_cap2_armed; // set when the third frame starts
+#endif
+
 void DMA_Handler(void) {
     uint32_t isr = DMAx->ISR;
 
@@ -226,6 +236,28 @@ void DMA_Handler(void) {
 
         int errCode = 0;
         if (isr & DMA_ISR_TC_TX) {
+#if defined(PY32F0)
+            // F1-style USART: TC is set by ANY gap between bytes (TXE still set at
+            // the end of a stop bit, which DMA latency causes now and then), and a
+            // DMA write to DR doesn't clear it. So TC is usually already set here,
+            // the wait below returned at once, and the end-of-frame pulse cut off
+            // the last bytes: every frame failed its CRC at the receiver (captured
+            // on silicon 2026-10-07; docs/py32-porting.md). The DMA has only
+            // just handed over the last byte, so at least one byte time remains:
+            // clear TC now and wait for the real end of the frame.
+            py32_usart_clear_tc(USARTx);
+#endif
+#ifdef PY32_TX_CAPTURE
+            if (py32_cap2_armed == 1) {
+                py32_cap2_mark[0] = SysTick->VAL;
+                unsigned n = 0;
+                while (!LL_USART_IsActiveFlag_TC(USARTx))
+                    if (n < CAP2_N)
+                        py32_cap2[n++] = (PIN_PORT(UART_PIN)->IDR & PIN_MASK(UART_PIN)) != 0;
+                py32_cap2_mark[1] = SysTick->VAL;
+                py32_cap2_len = n;
+            }
+#endif
             while (!LL_USART_IsActiveFlag_TC(USARTx))
                 ;
 // the standard BRK signal is too short - it's 10uS - to be detected as break at least on NRF52
@@ -233,8 +265,18 @@ void DMA_Handler(void) {
             LL_USART_Disable(USARTx);
             LL_GPIO_SetPinMode(PIN_PORT(UART_PIN), PIN_MASK(UART_PIN), LL_GPIO_MODE_OUTPUT);
             LL_GPIO_ResetOutputPin(PIN_PORT(UART_PIN), PIN_MASK(UART_PIN));
+#ifdef PY32_TX_CAPTURE
+            if (py32_cap2_armed == 1)
+                py32_cap2_mark[2] = SysTick->VAL;
+#endif
             target_wait_us(12);
             LL_GPIO_SetOutputPin(PIN_PORT(UART_PIN), PIN_MASK(UART_PIN));
+#ifdef PY32_TX_CAPTURE
+            if (py32_cap2_armed == 1) {
+                py32_cap2_mark[3] = SysTick->VAL;
+                py32_cap2_armed = 2;
+            }
+#endif
 #else
             LL_USART_RequestBreakSending(USARTx);
             // DMESG("USARTx %x", USARTx->ISR);
@@ -405,7 +447,49 @@ int uart_wait_high() {
         return 0;
 }
 
+#ifdef PY32_TX_CAPTURE
+// DEBUG ONLY, off in normal builds (build with USERFLAGS=-DPY32_TX_CAPTURE).
+// Samples the bus pin while the third transmitted frame goes out, for reading
+// over SWD: one byte per sample from a tight RAM loop (about 6 per bit at
+// 1 Mbaud), timed overall with SysTick (48 per us, counting down). Also marks
+// the start pulse and DMA start, and copies the bytes meant to go out.
+#define CAP_N 3000
+uint8_t py32_cap[CAP_N];
+uint32_t py32_cap_mark[4]; // pulse low, pulse high, DMA start, sampling end
+uint8_t py32_cap_frame[64];
+volatile uint8_t py32_cap_state; // frames seen, saturating at 3
+#define CAP_MARK(i)                                                                                \
+    do {                                                                                           \
+        if (py32_cap_state == 2)                                                                   \
+            py32_cap_mark[i] = SysTick->VAL;                                                       \
+    } while (0)
+RAM_FUNC
+static void py32_cap_sample(volatile uint32_t *idr, uint32_t mask) {
+    for (unsigned i = 0; i < CAP_N; ++i)
+        py32_cap[i] = (*idr & mask) != 0;
+}
+static void py32_cap_edges(const void *data, uint32_t numbytes) {
+    if (py32_cap_state > 2 || py32_cap_state++ != 2)
+        return;
+    py32_cap2_armed = 1;
+    // sample first: the DMA has just started, and the copy takes several us
+    py32_cap_sample(&PIN_PORT(UART_PIN)->IDR, PIN_MASK(UART_PIN));
+    py32_cap_mark[3] = SysTick->VAL;
+    memcpy(py32_cap_frame, data, numbytes < 64 ? numbytes : 64);
+}
+#else
+#define CAP_MARK(i) ((void)0)
+#define py32_cap_edges(d, n) ((void)0)
+#endif
+
 int uart_start_tx(const void *data, uint32_t numbytes) {
+#ifdef PY32_TX_CAPTURE
+    if (py32_cap_state == 0 && !(SysTick->CTRL & SysTick_CTRL_ENABLE_Msk)) {
+        SysTick->LOAD = 0xFFFFFF;
+        SysTick->VAL = 0;
+        SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_ENABLE_Msk;
+    }
+#endif
     // DMESG("tx %d", (int)numbytes);
     exti_disable(PIN_MASK(UART_PIN));
     exti_clear_falling(PIN_MASK(UART_PIN));
@@ -430,8 +514,10 @@ int uart_start_tx(const void *data, uint32_t numbytes) {
         target_enable_irq();
         return -1;
     }
+    CAP_MARK(0);
     target_wait_us(11);
     LL_GPIO_SetOutputPin(PIN_PORT(UART_PIN), PIN_MASK(UART_PIN));
+    CAP_MARK(1);
 
     // from here...
     uartOwnsPin(1);
@@ -461,6 +547,8 @@ int uart_start_tx(const void *data, uint32_t numbytes) {
     py32_usart_clear_tc(USARTx);
 #endif
     LL_DMA_EnableChannel(DMAx, DMA_CH_TX);
+    CAP_MARK(2);
+    py32_cap_edges(data, numbytes);
 
     return 0;
 }
