@@ -7,12 +7,15 @@ AS_SRC = $(STARTUP_FILE)
 DEFINES += -DUSE_FULL_LL_DRIVER -DSTM32$(SERIES)
 DEFINES += -D$(MCU) -DJD_FLASH_SIZE="1024*$(FLASH_SIZE)" -DJD_FLASH_PAGE_SIZE=$(PAGE_SIZE) -DBL_SIZE="1024*$(BL_SIZE)" -DJD_FLASH_SETTINGS_SIZE="1024*$(FLASH_SETTINGS_SIZE)" 
 
-include $(PLATFORM)/mk/$(MCU).mk
+# Per-MCU memory map. A family kept outside stm32/ (e.g. py32/) points MCU_MK at
+# its own copy before including this file.
+MCU_MK ?= $(PLATFORM)/mk/$(MCU).mk
+include $(MCU_MK)
 
-CONFIG_DEPS += $(wildcard $(PLATFORM)/mk/*.mk)
+CONFIG_DEPS += $(wildcard $(PLATFORM)/mk/*.mk) $(MCU_MK)
 
 LD_SCRIPT = $(BUILT)/linker.ld
-$(BUILT)/linker.ld: $(wildcard $(PLATFORM)/mk/*.mk) Makefile targets/$(TARGET)/config.mk
+$(BUILT)/linker.ld: $(wildcard $(PLATFORM)/mk/*.mk) $(MCU_MK) Makefile targets/$(TARGET)/config.mk
 	mkdir -p $(BUILT)
 	: > $@
 	echo "MEMORY {" >> $@

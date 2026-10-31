@@ -9,6 +9,8 @@
 #include "stm32g0.h"
 #elif defined(STM32C0)
 #include "stm32c0.h"
+#elif defined(PY32F0)
+#include "py32f0.h"
 #else
 #error "invalid CPU"
 #endif

@@ -10,12 +10,16 @@
 #define IRQHandler USART1_IRQHandler
 #define LL_DMAMUX_REQ_USARTx_RX LL_DMAMUX_REQ_USART1_RX
 #define LL_DMAMUX_REQ_USARTx_TX LL_DMAMUX_REQ_USART1_TX
+#define PY32_DMA_REQ_USARTx_RX LL_SYSCFG_DMA_MAP_USART1_RX
+#define PY32_DMA_REQ_USARTx_TX LL_SYSCFG_DMA_MAP_USART1_TX
 #elif USART_IDX == 2
 #define USARTx USART2
 #define IRQn USART2_IRQn
 #define IRQHandler USART2_IRQHandler
 #define LL_DMAMUX_REQ_USARTx_RX LL_DMAMUX_REQ_USART2_RX
 #define LL_DMAMUX_REQ_USARTx_TX LL_DMAMUX_REQ_USART2_TX
+#define PY32_DMA_REQ_USARTx_RX LL_SYSCFG_DMA_MAP_USART2_RX
+#define PY32_DMA_REQ_USARTx_TX LL_SYSCFG_DMA_MAP_USART2_TX
 #elif USART_IDX == 4
 #ifdef STM32L4
 #define USARTx UART4
@@ -42,6 +46,23 @@
 #elif defined(STM32C0)
 // C031's DMA1 has only 3 channels (1-3); channel 1 is the WS2812 SPI output, so
 // the half-duplex UART uses channels 2 (TX) and 3 (RX), which share one IRQ.
+#define DMA_IRQn DMA1_Channel2_3_IRQn
+#define DMA_Handler DMA1_Channel2_3_IRQHandler
+#define DMA_CH_TX LL_DMA_CHANNEL_2
+#define DMA_CH_RX LL_DMA_CHANNEL_3
+#define DMA_ISR_TC_TX DMA_ISR_TCIF2
+#define DMA_ISR_TE_TX DMA_ISR_TEIF2
+#define DMA_ISR_TC_RX DMA_ISR_TCIF3
+#define DMA_ISR_TE_RX DMA_ISR_TEIF3
+#define DMA_CLEAR_TX() LL_DMA_ClearFlag_GI2(DMAx)
+#define DMA_CLEAR_RX() LL_DMA_ClearFlag_GI3(DMAx)
+#define NEW_UART 1
+#elif defined(PY32F0)
+// PY32's DMA matches C031's: 3 channels, Channel1 + Channel2_3 IRQs. Channel 1 is
+// the WS2812 SPI output (spidef.h), so the UART takes 2 (TX) and 3 (RX). Requests
+// are routed through SYSCFG_CFGR3 (py32_dma_set_request), as PY32 has no DMAMUX.
+// NEW_UART selects 16x oversampling with BRR = HSI_MHZ (48) below, which is what
+// PY32 needs (its OVER8 bit lives in CR3, not CR1, and CR3 is zeroed below).
 #define DMA_IRQn DMA1_Channel2_3_IRQn
 #define DMA_Handler DMA1_Channel2_3_IRQHandler
 #define DMA_CH_TX LL_DMA_CHANNEL_2
@@ -103,6 +124,38 @@
 // DMA Channel 4 - TX
 // DMA Channel 5 - RX
 
+// USART data register and error clearing. PY32's USART has the STM32F1 register
+// set: no ISR, ICR, RDR/TDR, REACK or TEACK (see py32f0.h for the shared helpers).
+// On F1-style parts TE/RE take effect without an acknowledge.
+#if defined(PY32F0)
+#define USART_TX_DR(u) (&(u)->DR)
+#define USART_RX_DR(u) (&(u)->DR)
+static inline void usart_clear_errors(void) {
+    py32_usart_clear_errors(USARTx); // SR then DR read: clears FE, NE, ORE, IDLE
+}
+static inline void usart_clear_errors_tc(void) {
+    usart_clear_errors();
+    py32_usart_clear_tc(USARTx);
+}
+#define USART_WAIT_TEACK() ((void)0)
+#define USART_WAIT_REACK() ((void)0)
+#else
+#define USART_TX_DR(u) (&(u)->TDR)
+#define USART_RX_DR(u) (&(u)->RDR)
+static inline void usart_clear_errors(void) {
+    USARTx->ICR = USART_ISR_FE | USART_ISR_NE | USART_ISR_ORE;
+}
+static inline void usart_clear_errors_tc(void) {
+    USARTx->ICR = USART_ISR_FE | USART_ISR_NE | USART_ISR_ORE | USART_ISR_TC;
+}
+#define USART_WAIT_TEACK()                                                                         \
+    while (!(LL_USART_IsActiveFlag_TEACK(USARTx)))                                                 \
+        ;
+#define USART_WAIT_REACK()                                                                         \
+    while (!(LL_USART_IsActiveFlag_REACK(USARTx)))                                                 \
+        ;
+#endif
+
 // This is extracted to a function to make sure the compiler doesn't
 // insert stuff between checking the input pin and setting the mode.
 // This results in a collision window of around 90ns
@@ -134,9 +187,31 @@ void uart_disable() {
 
     LL_USART_Disable(USARTx);
 
+#if defined(PY32F0)
+    // On ST's newer USART, clearing UE also resets every status flag, and the
+    // error IRQ path below relies on that. PY32's F1-style USART keeps them. A
+    // leftover FE/ORE with EIE and the RX DMA request still enabled would keep the
+    // error interrupt asserted: an IRQ storm that hangs the MCU (the same class of
+    // bug as the C0 DMA-flag hang). So clear them explicitly, and drop the DMA
+    // requests; uart_start_tx/rx re-enable what they need.
+    LL_USART_DisableDMAReq_RX(USARTx);
+    LL_USART_DisableDMAReq_TX(USARTx);
+    usart_clear_errors();
+#endif
+
     uartOwnsPin(0);
     // pulse_log_pin();
 }
+
+#ifdef PY32_TX_CAPTURE
+// Second stage: the end of the captured frame, sampled while DMA_Handler waits
+// for TC, with SysTick marks: handler entry, TC seen, break start, break end.
+#define CAP2_N 400
+uint8_t py32_cap2[CAP2_N];
+uint32_t py32_cap2_mark[4];
+volatile uint16_t py32_cap2_len;
+volatile uint8_t py32_cap2_armed; // set when the third frame starts
+#endif
 
 void DMA_Handler(void) {
     uint32_t isr = DMAx->ISR;
@@ -161,6 +236,28 @@ void DMA_Handler(void) {
 
         int errCode = 0;
         if (isr & DMA_ISR_TC_TX) {
+#if defined(PY32F0)
+            // F1-style USART: TC is set by ANY gap between bytes (TXE still set at
+            // the end of a stop bit, which DMA latency causes now and then), and a
+            // DMA write to DR doesn't clear it. So TC is usually already set here,
+            // the wait below returned at once, and the end-of-frame pulse cut off
+            // the last bytes: every frame failed its CRC at the receiver (captured
+            // on silicon 2026-10-07; docs/py32-porting.md). The DMA has only
+            // just handed over the last byte, so at least one byte time remains:
+            // clear TC now and wait for the real end of the frame.
+            py32_usart_clear_tc(USARTx);
+#endif
+#ifdef PY32_TX_CAPTURE
+            if (py32_cap2_armed == 1) {
+                py32_cap2_mark[0] = SysTick->VAL;
+                unsigned n = 0;
+                while (!LL_USART_IsActiveFlag_TC(USARTx))
+                    if (n < CAP2_N)
+                        py32_cap2[n++] = (PIN_PORT(UART_PIN)->IDR & PIN_MASK(UART_PIN)) != 0;
+                py32_cap2_mark[1] = SysTick->VAL;
+                py32_cap2_len = n;
+            }
+#endif
             while (!LL_USART_IsActiveFlag_TC(USARTx))
                 ;
 // the standard BRK signal is too short - it's 10uS - to be detected as break at least on NRF52
@@ -168,8 +265,18 @@ void DMA_Handler(void) {
             LL_USART_Disable(USARTx);
             LL_GPIO_SetPinMode(PIN_PORT(UART_PIN), PIN_MASK(UART_PIN), LL_GPIO_MODE_OUTPUT);
             LL_GPIO_ResetOutputPin(PIN_PORT(UART_PIN), PIN_MASK(UART_PIN));
+#ifdef PY32_TX_CAPTURE
+            if (py32_cap2_armed == 1)
+                py32_cap2_mark[2] = SysTick->VAL;
+#endif
             target_wait_us(12);
             LL_GPIO_SetOutputPin(PIN_PORT(UART_PIN), PIN_MASK(UART_PIN));
+#ifdef PY32_TX_CAPTURE
+            if (py32_cap2_armed == 1) {
+                py32_cap2_mark[3] = SysTick->VAL;
+                py32_cap2_armed = 2;
+            }
+#endif
 #else
             LL_USART_RequestBreakSending(USARTx);
             // DMESG("USARTx %x", USARTx->ISR);
@@ -232,6 +339,9 @@ static void USART_UART_Init(void) {
     // C0 has no plain "HSI" USART source; SYSCLK is HSI48 at 48 MHz (HSIDIV=1),
     // so BRR = HSI_MHZ (48) still yields 1 Mbaud at 16x oversampling.
     LL_RCC_SetUSARTClockSource(LL_RCC_USART1_CLKSOURCE_SYSCLK);
+#elif defined(PY32F0)
+    // PY32 has no USART clock mux: USART1 always runs from PCLK, which is fixed at
+    // 48 MHz (py32f0.h), so BRR = HSI_MHZ (48) gives exactly 1 Mbaud at 16x.
 #else
     LL_RCC_SetUSARTClockSource(LL_RCC_USART1_CLKSOURCE_HSI);
 #endif
@@ -253,7 +363,9 @@ static void USART_UART_Init(void) {
 #endif
 
     /* USART_RX Init */
-#if NEW_UART
+#if defined(PY32F0)
+    py32_dma_set_request(DMA_CH_RX, PY32_DMA_REQ_USARTx_RX);
+#elif NEW_UART
     LL_DMA_SetPeriphRequest(DMAx, DMA_CH_RX, LL_DMAMUX_REQ_USARTx_RX);
 #endif
     LL_DMA_ConfigTransfer(DMAx, DMA_CH_RX,
@@ -265,7 +377,9 @@ static void USART_UART_Init(void) {
                               LL_DMA_PDATAALIGN_BYTE |        //
                               LL_DMA_MDATAALIGN_BYTE);
     /* USART_TX Init */
-#if NEW_UART
+#if defined(PY32F0)
+    py32_dma_set_request(DMA_CH_TX, PY32_DMA_REQ_USARTx_TX);
+#elif NEW_UART
     LL_DMA_SetPeriphRequest(DMAx, DMA_CH_TX, LL_DMAMUX_REQ_USARTx_TX);
 #endif
     LL_DMA_ConfigTransfer(DMAx, DMA_CH_TX,
@@ -333,7 +447,49 @@ int uart_wait_high() {
         return 0;
 }
 
+#ifdef PY32_TX_CAPTURE
+// DEBUG ONLY, off in normal builds (build with USERFLAGS=-DPY32_TX_CAPTURE).
+// Samples the bus pin while the third transmitted frame goes out, for reading
+// over SWD: one byte per sample from a tight RAM loop (about 6 per bit at
+// 1 Mbaud), timed overall with SysTick (48 per us, counting down). Also marks
+// the start pulse and DMA start, and copies the bytes meant to go out.
+#define CAP_N 3000
+uint8_t py32_cap[CAP_N];
+uint32_t py32_cap_mark[4]; // pulse low, pulse high, DMA start, sampling end
+uint8_t py32_cap_frame[64];
+volatile uint8_t py32_cap_state; // frames seen, saturating at 3
+#define CAP_MARK(i)                                                                                \
+    do {                                                                                           \
+        if (py32_cap_state == 2)                                                                   \
+            py32_cap_mark[i] = SysTick->VAL;                                                       \
+    } while (0)
+RAM_FUNC
+static void py32_cap_sample(volatile uint32_t *idr, uint32_t mask) {
+    for (unsigned i = 0; i < CAP_N; ++i)
+        py32_cap[i] = (*idr & mask) != 0;
+}
+static void py32_cap_edges(const void *data, uint32_t numbytes) {
+    if (py32_cap_state > 2 || py32_cap_state++ != 2)
+        return;
+    py32_cap2_armed = 1;
+    // sample first: the DMA has just started, and the copy takes several us
+    py32_cap_sample(&PIN_PORT(UART_PIN)->IDR, PIN_MASK(UART_PIN));
+    py32_cap_mark[3] = SysTick->VAL;
+    memcpy(py32_cap_frame, data, numbytes < 64 ? numbytes : 64);
+}
+#else
+#define CAP_MARK(i) ((void)0)
+#define py32_cap_edges(d, n) ((void)0)
+#endif
+
 int uart_start_tx(const void *data, uint32_t numbytes) {
+#ifdef PY32_TX_CAPTURE
+    if (py32_cap_state == 0 && !(SysTick->CTRL & SysTick_CTRL_ENABLE_Msk)) {
+        SysTick->LOAD = 0xFFFFFF;
+        SysTick->VAL = 0;
+        SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_ENABLE_Msk;
+    }
+#endif
     // DMESG("tx %d", (int)numbytes);
     exti_disable(PIN_MASK(UART_PIN));
     exti_clear_falling(PIN_MASK(UART_PIN));
@@ -358,20 +514,20 @@ int uart_start_tx(const void *data, uint32_t numbytes) {
         target_enable_irq();
         return -1;
     }
+    CAP_MARK(0);
     target_wait_us(11);
     LL_GPIO_SetOutputPin(PIN_PORT(UART_PIN), PIN_MASK(UART_PIN));
+    CAP_MARK(1);
 
     // from here...
     uartOwnsPin(1);
     LL_USART_DisableDirectionRx(USARTx);
     LL_USART_EnableDirectionTx(USARTx);
-    USARTx->ICR = USART_ISR_FE | USART_ISR_NE | USART_ISR_ORE |
-                  USART_ISR_TC; // clear error flags before we start
+    usart_clear_errors_tc(); // clear error flags before we start
     LL_USART_Enable(USARTx);
-    while (!(LL_USART_IsActiveFlag_TEACK(USARTx)))
-        ;
+    USART_WAIT_TEACK();
 
-    LL_DMA_ConfigAddresses(DMAx, DMA_CH_TX, (uint32_t)data, (uint32_t) & (USARTx->TDR),
+    LL_DMA_ConfigAddresses(DMAx, DMA_CH_TX, (uint32_t)data, (uint32_t)USART_TX_DR(USARTx),
                            LL_DMA_DIRECTION_MEMORY_TO_PERIPH);
     LL_DMA_SetDataLength(DMAx, DMA_CH_TX, numbytes);
     LL_USART_EnableDMAReq_TX(USARTx);
@@ -381,7 +537,18 @@ int uart_start_tx(const void *data, uint32_t numbytes) {
     target_wait_us(45);
     // The spec requires min of 50us and max of 189us.
 
+#if defined(PY32F0)
+    // Enabling TE above sent an idle frame, which SET TC again after
+    // usart_clear_errors_tc(). A DMA write to DR alone isn't guaranteed to clear it
+    // (the F1 sequence is SR read then DR write), so clear it here, just before the
+    // DMA starts, as the F1 manual prescribes. Otherwise DMA_Handler's wait for TC
+    // returns while the last byte is still shifting out, and the break that follows
+    // truncates every packet.
+    py32_usart_clear_tc(USARTx);
+#endif
     LL_DMA_EnableChannel(DMAx, DMA_CH_TX);
+    CAP_MARK(2);
+    py32_cap_edges(data, numbytes);
 
     return 0;
 }
@@ -393,12 +560,11 @@ void uart_start_rx(void *data, uint32_t maxbytes) {
     uartOwnsPin(1);
     LL_USART_DisableDirectionTx(USARTx);
     LL_USART_EnableDirectionRx(USARTx);
-    USARTx->ICR = USART_ISR_FE | USART_ISR_NE | USART_ISR_ORE; // clear error flags before we start
+    usart_clear_errors(); // clear error flags before we start
     LL_USART_Enable(USARTx);
-    while (!(LL_USART_IsActiveFlag_REACK(USARTx)))
-        ;
+    USART_WAIT_REACK();
 
-    LL_DMA_ConfigAddresses(DMAx, DMA_CH_RX, (uint32_t) & (USARTx->RDR), (uint32_t)data,
+    LL_DMA_ConfigAddresses(DMAx, DMA_CH_RX, (uint32_t)USART_RX_DR(USARTx), (uint32_t)data,
                            LL_DMA_DIRECTION_PERIPH_TO_MEMORY);
     LL_DMA_SetDataLength(DMAx, DMA_CH_RX, maxbytes);
     LL_USART_EnableDMAReq_RX(USARTx);

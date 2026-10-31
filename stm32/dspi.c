@@ -267,11 +267,12 @@ void px_init(int light_type) {
     SPI_CLK_ENABLE();
     DMA_CLK_ENABLE();
 
-#if defined(DISABLE_PLL) && !defined(STM32C0)
+#if defined(DISABLE_PLL) && !defined(STM32C0) && !defined(PY32F0)
     // On F0/G0, DISABLE_PLL means the core drops to the raw HSI (8/16 MHz), too
     // slow for WS2812 SPI timing -> this undefined symbol trips the link to force
-    // the issue. C0 has no PLL but still runs HSI48 at 48 MHz, so the 48 MHz
-    // prescaler path below is valid and the tripwire does not apply.
+    // the issue. C0 has no PLL but still runs HSI48 at 48 MHz, and PY32 runs a
+    // fixed 48 MHz (HSI 24 x PLL 2, never switched), so the 48 MHz prescaler path
+    // below is valid for both and the tripwire does not apply.
     extern void pll_needed_for_px_init(void);
     pll_needed_for_px_init();
 #endif
@@ -290,11 +291,22 @@ void px_init(int light_type) {
 
 #if defined(STM32G0) || defined(STM32C0) || defined(STM32L)
     LL_DMA_SetPeriphRequest(DMA1, DMA_CH_TX, LL_DMAMUX_REQ_SPIx_TX);
+#elif defined(PY32F0)
+    // No DMAMUX: route SPI TX to its channel via SYSCFG_CFGR3. Without this the
+    // DMA never gets a request and no pixels are sent, silently.
+    py32_dma_set_request(DMA_CH_TX, PY32_DMA_REQ_SPIx_TX);
 #endif
 
+// (PY32's SPI is F0-style: mode bits in CR1, DS/FRXTH in CR2, as written below.
+// Its DS is a single bit, so LL_SPI_DATAWIDTH_8BIT is 0 there.)
 #if PLL_MHZ == 48
     SPIx->CR1 = LL_SPI_HALF_DUPLEX_TX | LL_SPI_MODE_MASTER | LL_SPI_NSS_SOFT |
                 LL_SPI_BAUDRATEPRESCALER_DIV16; // 3MHz
+    SPIx->CR2 = LL_SPI_DATAWIDTH_8BIT | LL_SPI_RX_FIFO_TH_QUARTER;
+#elif PLL_MHZ == 24
+    // PY32F003/F002A run at a fixed 24 MHz (no PLL): /8 gives the same 3 MHz
+    SPIx->CR1 = LL_SPI_HALF_DUPLEX_TX | LL_SPI_MODE_MASTER | LL_SPI_NSS_SOFT |
+                LL_SPI_BAUDRATEPRESCALER_DIV8; // 3MHz
     SPIx->CR2 = LL_SPI_DATAWIDTH_8BIT | LL_SPI_RX_FIFO_TH_QUARTER;
 #else
 #error "define prescaler"
