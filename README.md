@@ -3,6 +3,20 @@
 This repository contains firmware for [Jacdac](https://jacdac.github.io/jacdac-docs/) modules based on STM32F0xx and STM32G0xx
 chips and is part of the [Jacdac Device Development Kit](https://jacdac.github.io/jacdac-docs/ddk/).
 
+## Puya PY32F0
+
+The `py32f0` family also supports Puya's **PY32F030** and **PY32F003**, Cortex-M0+
+parts whose low-level drivers are a fork of ST's. The PY32-only files are in `py32/`
+(family header, build files and the vendored Puya SDK), and the shared drivers in
+`stm32/` and `bl/` have PY32 branches. A target selects it with
+`MCU = PY32F030x8` (or `PY32F003x6`, `PY32F003x8`) and
+`include $(JD_STM)/py32/mk/py32f0.mk` in its `config.mk`.
+
+See [docs/py32-porting.md](docs/py32-porting.md) for what differs from ST, the
+silicon issues found, RAM and stack figures, and a bring-up checklist.
+`test/build-check.sh` compiles the PY32 test targets with no hardware, and
+`tools/flash.sh` flashes them over SWD with pyOCD.
+
 ## Bootloader
 
 This repository contains both the firmware for running services (eg., accelerometer service) on a Jacdac module,
