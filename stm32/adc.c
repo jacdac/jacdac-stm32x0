@@ -84,11 +84,27 @@ static inline ErrorStatus py32_adc_disable(ADC_TypeDef *ADCx) {
     return status;
 }
 #define LL_ADC_Disable(adc) py32_adc_disable(adc)
+// PY32 CLEARS ADEN BY HARDWARE at the end of every software-triggered single
+// conversion, and ignores ADSTART while ADEN is 0, even when both are written
+// together. ST's ADEN stays set until ADDIS. Found on silicon (PY32F030K28U6,
+// 2026-10-04): the bootloader's 1000-conversion seed loop got one conversion and
+// then waited for EOC forever, with ADC_CR reading 0. Writing CR by hand over SWD
+// confirmed it (docs/py32-porting.md). So every conversion re-enables first.
+static inline void py32_adc_ensure_enabled(void) {
+    if (!LL_ADC_IsEnabled(ADC1)) {
+        LL_ADC_Enable(ADC1);
+        while (LL_ADC_IsActiveFlag_ADRDY(ADC1) == 0) // the 1 us stabilisation delay
+            ;
+    }
+}
 #else
 #define ADC_CLOCK_CFG LL_ADC_CLOCK_SYNC_PCLK_DIV2
 #endif
 
 uint16_t adc_convert(void) {
+#if defined(PY32F0)
+    py32_adc_ensure_enabled();
+#endif
     if ((LL_ADC_IsEnabled(ADC1) == 1) && (LL_ADC_IsDisableOngoing(ADC1) == 0) &&
         (LL_ADC_REG_IsConversionOngoing(ADC1) == 0)) {
         LL_ADC_REG_StartConversion(ADC1);
@@ -219,6 +235,9 @@ uint32_t bl_adc_random_seed(void) {
 
     uint32_t h = 231;
     for (int i = 0; i < 1000; ++i) {
+#if defined(PY32F0)
+        py32_adc_ensure_enabled();
+#endif
         LL_ADC_REG_StartConversion(ADC1);
         while (LL_ADC_IsActiveFlag_EOC(ADC1) == 0)
             ;
