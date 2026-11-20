@@ -233,12 +233,20 @@ void DMA_Handler(void) {
             // the wait below returned at once, and the end-of-frame pulse cut off
             // the last bytes: every frame failed its CRC at the receiver (captured
             // on silicon 2026-10-07; docs/py32-porting.md). The DMA has only
-            // just handed over the last byte, so at least one byte time remains:
-            // clear TC now and wait for the real end of the frame.
+            // just handed over the last byte, so normally at least one byte time
+            // remains: clear TC now and wait for the real end of the frame.
+            // If this handler ran late (a higher priority IRQ, a flash stall, a
+            // critical section), the frame may already be over and TC would never
+            // set again, so the wait is bounded. The last two bytes (DR and the
+            // shift register) take 20 us at 1 Mbaud; each pass of the loop takes
+            // at least 4 cycles, so the bound is at least 30 us.
             py32_usart_clear_tc(USARTx);
-#endif
+            for (unsigned n = 30 * HSI_MHZ / 4; n && !LL_USART_IsActiveFlag_TC(USARTx); --n)
+                ;
+#else
             while (!LL_USART_IsActiveFlag_TC(USARTx))
                 ;
+#endif
 // the standard BRK signal is too short - it's 10uS - to be detected as break at least on NRF52
 #if 1
             LL_USART_Disable(USARTx);

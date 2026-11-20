@@ -137,7 +137,9 @@ A review before hardware also found and fixed:
     to `DR` doesn't clear it, unlike ST's newer USART, so `DMA_Handler`'s wait for
     `TC` returned at once (0.4 us) and the end-of-frame pulse cut off the final
     byte. Fix: clear `TC` on entry to the handler, before waiting. The wait is now
-    8.5 us and frames pass CRC.
+    8.5 us and frames pass CRC. The wait is bounded (at least 30 us, longer than
+    the last two bytes take), so a handler that runs late, after the frame has
+    already ended, can't hang on a `TC` that will never set again.
 
 ## RAM
 
