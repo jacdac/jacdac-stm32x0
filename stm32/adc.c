@@ -51,7 +51,8 @@ static inline uint32_t py32_adc_wait_ready(void) {
 // __disable_irq()/__enable_irq(). PRIMASK is one bit, not a counter, so a caller
 // that had interrupts off gets them turned back on mid-critical-section (ST's
 // version never touches PRIMASK). This is the same sequence, copied from
-// py32f0xx_ll_adc.h (SDK v1.5.0, BSD-3), with the caller's state restored instead.
+// py32f0xx_ll_adc.h (SDK v1.5.0, BSD-3), with the caller's state restored instead,
+// and with the timeouts ending their loops (Puya's set ERROR and keep waiting).
 static inline ErrorStatus py32_adc_disable(ADC_TypeDef *ADCx) {
     ErrorStatus status = SUCCESS;
     uint32_t tmpCFGR1 = ADCx->CFGR1;
@@ -73,12 +74,16 @@ static inline ErrorStatus py32_adc_disable(ADC_TypeDef *ADCx) {
         }
         timeout_cpu_cycles = LL_ADC_TIMEOUT_STOP_CONVERSION_CPU_CYCLES;
         while (LL_ADC_REG_IsStopConversionOngoing(ADCx) == 1U)
-            if (timeout_cpu_cycles-- == 0U)
+            if (timeout_cpu_cycles-- == 0U) {
                 status = ERROR;
+                break;
+            }
         timeout_cpu_cycles = LL_ADC_TIMEOUT_DISABLE_CPU_CYCLES;
         while (LL_ADC_IsEnabled(ADCx) == 1U)
-            if (timeout_cpu_cycles-- == 0U)
+            if (timeout_cpu_cycles-- == 0U) {
                 status = ERROR;
+                break;
+            }
         ADCx->CFGR1 = tmpCFGR1;
     }
     return status;
