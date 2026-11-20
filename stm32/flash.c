@@ -13,9 +13,9 @@
 //    factory calibration for the current HSI setting (24 MHz; see py32f0.h).
 //
 // Partial-page writes are needed (the settings store appends small records, and
-// the bootloader writes an 8-byte device ID into its own page). Every word not
-// being written is filled with 0xFFFFFFFF, which leaves those cells unchanged,
-// because programming can only clear bits.
+// the bootloader writes an 8-byte device ID into its own page). They follow the
+// reference manual's read-modify-write: the page's current 32 words are read into
+// a buffer, the new words are placed in it, and the whole page is programmed.
 //
 // Error handling differs from the ST branch on purpose. ST's code panics unless
 // EOP is set after each operation (on G0 that needs EOPIE). Puya's HAL never
@@ -89,7 +89,7 @@ void flash_program(void *dst, const void *src, uint32_t len) {
             n = PAGE_WORDS - first;
 
         for (unsigned i = 0; i < PAGE_WORDS; ++i)
-            buf[i] = 0xffffffff; // leaves those words unchanged
+            buf[i] = cur[i]; // read-modify-write, as the reference manual describes
         for (unsigned i = 0; i < n; ++i) {
             // Same rule as the ST branches: only program erased words, except that
             // writing zero over anything is allowed (used to invalidate records).

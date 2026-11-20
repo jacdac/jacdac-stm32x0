@@ -26,6 +26,7 @@ Programming writes **a whole 128-byte page (32 × 32-bit words)** at a time:
 
 1. Check `BSY` in `FLASH_SR`.
 2. If the page already holds data, **read out its 32 words first** (read-modify-write).
+   `flash_program()` in `stm32/flash.c` does this for every partial-page write.
 3. Unlock: write **KEY1 `0x45670123`**, **KEY2 `0xCDEF89AB`** to `FLASH_KEYR`
    — *identical values to ST.* ✅
 4. Set `PG` + `EOPIE` in `FLASH_CR`.
