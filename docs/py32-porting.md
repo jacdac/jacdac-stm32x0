@@ -139,13 +139,6 @@ A review before hardware also found and fixed:
     byte. Fix: clear `TC` on entry to the handler, before waiting. The wait is now
     8.5 us and frames pass CRC.
 
-**Debug aid: `-DPY32_TX_CAPTURE`** (off in normal builds; build with
-`USERFLAGS=-DPY32_TX_CAPTURE`). It samples the bus pin from a RAM loop while the
-third frame goes out, and again while `DMA_Handler` waits for `TC`, with SysTick
-marks at the start pulse, DMA start, `TC` and end pulse, plus a copy of the bytes
-meant to go out. Everything can be read and decoded over SWD without a logic
-analyser. Bugs 9 and 10 were found with it.
-
 ## RAM
 
 Measured on PY32 builds:
