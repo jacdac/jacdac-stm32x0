@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Compile-check the PY32 family without any hardware.
 #
-# jacdac-py32 is a platform layer, not a standalone build (like upstream
-# jacdac-stm32x0), so this assembles a throwaway top-level module repo in a temp
-# directory: this repo in the platform slot, an upstream jacdac-c checkout, and the
+# jacdac-stm32x0 is a platform layer, not a standalone build, so this assembles a
+# throwaway top-level module repo in a temp directory: this repo in the platform slot, an upstream jacdac-c checkout, and the
 # compile-test targets from test/targets/. Neither repo is modified.
 #
 # Usage:  test/build-check.sh [/path/to/jacdac-c] [target ...]

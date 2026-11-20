@@ -102,7 +102,7 @@ void uart_init(ctx_t *ctx) {
 #if defined(PY32F0)
     // 16x oversampling: PY32 keeps OVER8 in CR3 (bit 11), so ORing
     // LL_USART_OVERSAMPLING_8 into CR1 would set WAKE instead and leave the bus at
-    // half speed. BRR = CPU_MHZ (48) is exactly 1 Mbaud at 16x.
+    // half speed. BRR = CPU_MHZ (48 on F030, 24 on F003) is exactly 1 Mbaud at 16x.
     USARTx->CR1 = LL_USART_DATAWIDTH_8B | LL_USART_PARITY_NONE | LL_USART_DIRECTION_TX;
     USARTx->BRR = CPU_MHZ; // ->1MHz (16x oversampling)
 #else

@@ -271,8 +271,9 @@ void px_init(int light_type) {
     // On F0/G0, DISABLE_PLL means the core drops to the raw HSI (8/16 MHz), too
     // slow for WS2812 SPI timing -> this undefined symbol trips the link to force
     // the issue. C0 has no PLL but still runs HSI48 at 48 MHz, and PY32 runs a
-    // fixed 48 MHz (HSI 24 x PLL 2, never switched), so the 48 MHz prescaler path
-    // below is valid for both and the tripwire does not apply.
+    // fixed clock that is never switched: 48 MHz on F030 (HSI 24 x PLL 2) and
+    // 24 MHz on F003 (HSI 24, no PLL). The prescalers below cover 48 and 24 MHz
+    // (both give 3 MHz), so the tripwire does not apply.
     extern void pll_needed_for_px_init(void);
     pll_needed_for_px_init();
 #endif
