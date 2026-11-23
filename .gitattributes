@@ -1,0 +1,5 @@
+# Vendored Puya SDK files are kept byte-for-byte (CRLF line endings included),
+# so they can be diffed against future Puya releases. Never normalise them.
+py32/py32f0xx_ll_driver/**   -text
+py32/cmsis_device_py32f0/**  -text
+py32/cmsis_core_py32/**      -text
