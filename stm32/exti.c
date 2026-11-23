@@ -3,7 +3,7 @@
 static cb_t callbacks[16];
 
 static void _check_line(int ln) {
-#if defined(STM32F0) || defined(STM32L)
+#if defined(STM32F0) || defined(STM32L) || defined(PY32F0)
     LL_EXTI_ClearFlag_0_31(1 << ln);
 #else
     LL_EXTI_ClearRisingFlag_0_31(1 << ln);
@@ -87,14 +87,44 @@ void EXTI4_15_IRQHandler(void) {
 
 #if defined(STM32G0) || defined(STM32C0)
 static const uint32_t cfgs[] = {LL_EXTI_CONFIG_PORTA, LL_EXTI_CONFIG_PORTB, LL_EXTI_CONFIG_PORTC};
+#elif defined(PY32F0)
+// PY32 routes a GPIO to an EXTI line through EXTI->EXTICR (like G0/C0, not F0's
+// SYSCFG), but with its own encoding, and only lines 0-8 have a selector at all:
+// lines 0-4 choose port A/B/F, lines 5-8 choose A/B, and lines 9-15 are wired to
+// port A. Puya's LL_EXTI_CONFIG_LINEx constants carry the register, position and
+// mask for each selectable line.
+static const uint32_t py32_exti_line[9] = {
+    LL_EXTI_CONFIG_LINE0, LL_EXTI_CONFIG_LINE1, LL_EXTI_CONFIG_LINE2,
+    LL_EXTI_CONFIG_LINE3, LL_EXTI_CONFIG_LINE4, LL_EXTI_CONFIG_LINE5,
+    LL_EXTI_CONFIG_LINE6, LL_EXTI_CONFIG_LINE7, LL_EXTI_CONFIG_LINE8,
+};
 #endif
 
 void exti_set_callback(uint8_t pin, cb_t callback, uint32_t flags) {
     uint32_t extiport = 0;
 
+#if defined(PY32F0)
+    // PY32 ports are A (0), B (1) and F (5: GPIOF sits at IOPORT_BASE + 0x1400).
+    switch (pin >> 4) {
+    case 0:
+        extiport = LL_EXTI_CONFIG_PORTA;
+        break;
+    case 1:
+        extiport = LL_EXTI_CONFIG_PORTB;
+        break;
+    case 5:
+        extiport = LL_EXTI_CONFIG_PORTF;
+        break;
+    default:
+        JD_PANIC();
+    }
+#else
     if (pin >> 4 > 2)
         JD_PANIC();
-#if defined(STM32F0) || defined(STM32L)
+#endif
+#if defined(PY32F0)
+    // port already resolved above
+#elif defined(STM32F0) || defined(STM32L)
     extiport = pin >> 4;
 #elif defined(STM32G0) || defined(STM32C0)
     extiport = cfgs[pin >> 4];
@@ -110,6 +140,16 @@ void exti_set_callback(uint8_t pin, cb_t callback, uint32_t flags) {
 #elif defined(STM32L)
     uint32_t line = (pos >> 2) | (0xF << (16 + (4 * (pos & 3))));
     LL_SYSCFG_SetEXTISource(extiport, line);
+#elif defined(PY32F0)
+    if (pos <= 8) {
+        // lines 5-8 only select between A and B
+        if (pos >= 5 && extiport == LL_EXTI_CONFIG_PORTF)
+            JD_PANIC();
+        LL_EXTI_SetEXTISource(extiport, py32_exti_line[pos]);
+    } else if (extiport != LL_EXTI_CONFIG_PORTA) {
+        // lines 9-15 have no selector and always come from port A
+        JD_PANIC();
+    }
 #else
     uint32_t line = (pos >> 2) | ((pos & 3) << 19);
     LL_EXTI_SetEXTISource(extiport, line);

@@ -7,7 +7,8 @@ struct TimDesc {
 };
 
 static const struct TimDesc tims[] = {
-#if defined(STM32G0) || defined(STM32C0)
+// PY32 uses G0-style RCC_APBENR1/2 with the same bit names; it has no TIM2.
+#if defined(STM32G0) || defined(STM32C0) || defined(PY32F0)
 #define APB1ENR APBENR1
 #define APB2ENR APBENR2
     {TIM1, 2, RCC_APBENR2_TIM1EN},   //
@@ -66,6 +67,20 @@ static const struct PinPWM pins[] = {
     {PA_10, 3, LL_GPIO_AF_2, TIM1}, //
     {PA_8, 1, LL_GPIO_AF_2, TIM1},  // rotary
     {PA_9, 2, LL_GPIO_AF_2, TIM1},  // rotary
+#elif defined(PY32F0)
+    // AFs from the PY32F030 datasheet V2.8, tables 3-6/3-7 (port A/B AF maps).
+    // PY32 AFs differ from ST's for some timer pins (e.g. TIM1 on PA0/PA1 is AF13),
+    // so don't copy entries from the G0/C0 table above without checking. (The
+    // PY32F003's own AF map still needs checking separately.)
+#ifndef SYSTIM_ON_TIM14
+    {PA_4, 1, LL_GPIO_AF_4, TIM14}, // blue status LED on the F2 pinout (PB1 unbonded)
+#endif
+    {PA_6, 1, LL_GPIO_AF_1, TIM3},  // rgb led
+    {PA_7, 2, LL_GPIO_AF_1, TIM3},  // rgb led
+    {PB_0, 3, LL_GPIO_AF_1, TIM3},  // rgb led (as ST)
+    {PB_1, 4, LL_GPIO_AF_1, TIM3},  // rgb led (as ST; the G030 boards' blue LED)
+    {PA_0, 3, LL_GPIO_AF_13, TIM1}, //
+    {PA_1, 4, LL_GPIO_AF_13, TIM1}, //
 #elif defined(STM32F0)
 #ifdef TIM2
     {PA_1, 2, LL_GPIO_AF_2, TIM2},   // LED on jdm-v2

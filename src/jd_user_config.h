@@ -52,4 +52,17 @@
 #define JD_HW_ALLOC 1
 #endif
 
+// Stack kept free above the heap (jacdac-c simple_alloc.c; its default is 512 B).
+// The static worst case on PY32 (test/stack-usage.py, docs/py32-porting.md,
+// "Stack") is up to 740 B with DMESG compiled out and about 1.6 KB with it in,
+// both over 512 B. It matters once a service takes all the remaining heap, as
+// the LED strip does. A board.h can still set its own value.
+#if defined(PY32F0) && !defined(JD_STACK_SIZE)
+#if defined(DEVICE_DMESG_BUFFER_SIZE) && DEVICE_DMESG_BUFFER_SIZE == 0
+#define JD_STACK_SIZE 1024
+#else
+#define JD_STACK_SIZE 1792
+#endif
+#endif
+
 #endif

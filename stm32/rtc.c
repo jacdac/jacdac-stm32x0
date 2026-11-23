@@ -1,5 +1,54 @@
 #include "jdstm.h"
 
+#if defined(PY32F0)
+// PY32: SHALLOW SLEEP ONLY, for now.
+//
+// On ST parts this file implements deep sleep: rtc_sleep() enters STOP mode with
+// an RTC alarm set for the next timer callback, and rtc_sync_time() re-bases the
+// microsecond clock from the RTC after wake-up. That relies on ST's calendar RTC
+// (TR/DR/SSR, alarm A with a subsecond mask).
+//
+// PY32F0's RTC is a different, STM32F1-style peripheral: a 32-bit counter with a
+// prescaler and a single alarm (CNT/ALR). The deep-sleep path needs a driver for
+// it, which is a contained follow-up but is not needed to bring up the bus.
+//
+// Until then rtc_sleep() always sleeps shallow (WFI in Sleep mode). That is
+// functionally correct: the system timer (tim.c), the UART, DMA and EXTI all keep
+// running and wake the core as usual, so no time needs re-syncing. The cost is
+// idle current: Sleep instead of STOP. See docs/py32-porting.md (known gaps).
+
+void rtc_init(void) {}
+
+void rtc_sleep(bool forceShallow) {
+    (void)forceShallow;
+    __WFI();
+}
+
+void rtc_deepsleep(void) {
+    __WFI();
+}
+
+// Nothing to re-sync: the system timer never stops in Sleep mode.
+void rtc_sync_time(void) {}
+
+void rtc_cancel_cb(void) {}
+
+uint32_t rtc_get_seconds(void) {
+    return 0;
+}
+
+// Standby isn't supported without the RTC driver. Its only caller (src/main.c)
+// is commented out upstream, so this should never run; panic loudly if it does.
+void rtc_set_to_seconds_and_standby(void) {
+    JD_PANIC();
+}
+
+bool rtc_check_standby(void) {
+    return false;
+}
+
+#else // !PY32F0: ST calendar-RTC implementation
+
 #define US_TICK_SCALE 16
 #define TICK_US_SCALE 10
 #define US_TO_TICKS(us) (((uint32_t)(us)*ctx->ticksPerUs) >> US_TICK_SCALE)
@@ -375,3 +424,5 @@ void rtc_deepsleep(void) {
     rtc_sync_time();      // likely already happened in ISR, but doesn't hurt to check again
     LL_LPM_EnableSleep(); // i.e., no deep
 }
+
+#endif // !PY32F0

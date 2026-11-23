@@ -58,6 +58,47 @@
 #define CHANNEL 3
 #define AF LL_GPIO_AF_1
 #endif
+#elif defined(PY32F0)
+// PY32 AFs from the PY32F030 datasheet V2.8, tables 3-6/3-7. Some differ from
+// ST's (TIM1 on PA0/PA1 is AF13), so this is not a copy of the G0 list.
+#if PIN_BL_LED == PA_4
+// blue status LED on the F2 pinout, where PB1 is not bonded
+#define TIMx TIM14
+#define TIMx_CLK_ENABLE __HAL_RCC_TIM14_CLK_ENABLE
+#define CHANNEL 1
+#define AF LL_GPIO_AF_4
+#elif PIN_BL_LED == PA_6
+#define TIMx TIM3
+#define TIMx_CLK_ENABLE __HAL_RCC_TIM3_CLK_ENABLE
+#define CHANNEL 1
+#define AF LL_GPIO_AF_1
+#elif PIN_BL_LED == PA_7
+#define TIMx TIM3
+#define TIMx_CLK_ENABLE __HAL_RCC_TIM3_CLK_ENABLE
+#define CHANNEL 2
+#define AF LL_GPIO_AF_1
+#elif PIN_BL_LED == PA_0
+#define TIMx TIM1
+#define TIMx_CLK_ENABLE __HAL_RCC_TIM1_CLK_ENABLE
+#define CHANNEL 3
+#define AF LL_GPIO_AF_13
+#elif PIN_BL_LED == PA_1
+#define TIMx TIM1
+#define TIMx_CLK_ENABLE __HAL_RCC_TIM1_CLK_ENABLE
+#define CHANNEL 4
+#define AF LL_GPIO_AF_13
+#elif PIN_BL_LED == PB_0
+#define TIMx TIM3
+#define TIMx_CLK_ENABLE __HAL_RCC_TIM3_CLK_ENABLE
+#define CHANNEL 3
+#define AF LL_GPIO_AF_1
+#elif PIN_BL_LED == PB_1
+// the G030 boards' blue status LED; same TIM3_CH4 @ AF1 as on ST
+#define TIMx TIM3
+#define TIMx_CLK_ENABLE __HAL_RCC_TIM3_CLK_ENABLE
+#define CHANNEL 4
+#define AF LL_GPIO_AF_1
+#endif
 #else
 #error "unsupported MCU"
 #endif

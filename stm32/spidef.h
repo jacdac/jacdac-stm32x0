@@ -1,7 +1,8 @@
 #pragma once
 
-#if defined(STM32G031xx) || defined(STM32G030xx) || defined(STM32C031xx)
+#if defined(STM32G031xx) || defined(STM32G030xx) || defined(STM32C031xx) || defined(PY32F0)
 #if PIN_ASCK == PA_5 || PIN_ASCK == PA_1
+// (PY32: PA5 = SPI1_SCK and PA12/PA7 = SPI1_MOSI, all AF0, as on G0/C0.)
 #define SPI_IDX 1
 #elif PIN_ASCK == PA_0
 #define SPI_IDX 2
@@ -26,6 +27,8 @@
 #define IRQHandler SPI1_IRQHandler
 #define LL_DMAMUX_REQ_SPIx_RX LL_DMAMUX_REQ_SPI1_RX
 #define LL_DMAMUX_REQ_SPIx_TX LL_DMAMUX_REQ_SPI1_TX
+#define PY32_DMA_REQ_SPIx_RX LL_SYSCFG_DMA_MAP_SPI1_RX
+#define PY32_DMA_REQ_SPIx_TX LL_SYSCFG_DMA_MAP_SPI1_TX
 #elif SPI_IDX == 2
 #define SPIx SPI2
 #define IRQn SPI2_IRQn
@@ -88,7 +91,14 @@ STATIC_ASSERT(PIN_AMISO == -1);
 #error "bad spi IDX"
 #endif
 
-#if defined(STM32G0) || defined(STM32C0)
+// PY32 shares C0's layout: 3 channels, with Channel1 and Channel2_3 IRQs.
+#if defined(PY32F0) && SPI_RX
+// With only 3 DMA channels, SPI_RX would put SPI on channels 2/3, which uart.c
+// uses for the Jacdac bus on PY32; py32_dma_set_request() would silently re-route
+// them and the bus would go dead. (C0 has the same conflict.)
+#error "SPI_RX is not supported on PY32: it needs DMA channels 2/3, used by the Jacdac UART"
+#endif
+#if defined(STM32G0) || defined(STM32C0) || defined(PY32F0)
 #if SPI_RX
 #define DMA_CH_TX LL_DMA_CHANNEL_3
 #define DMA_CH_RX LL_DMA_CHANNEL_2
@@ -146,6 +156,8 @@ static inline void spi_init1(void) {
 
 #if defined(STM32G0) || defined(STM32C0)
     LL_DMA_SetPeriphRequest(DMA1, DMA_CH_TX, LL_DMAMUX_REQ_SPIx_TX);
+#elif defined(PY32F0)
+    py32_dma_set_request(DMA_CH_TX, PY32_DMA_REQ_SPIx_TX);
 #endif
     LL_DMA_ConfigTransfer(DMA1, DMA_CH_TX,
                           LL_DMA_DIRECTION_MEMORY_TO_PERIPH | //
@@ -159,6 +171,8 @@ static inline void spi_init1(void) {
 #if SPI_RX
 #if defined(STM32G0) || defined(STM32C0)
     LL_DMA_SetPeriphRequest(DMA1, DMA_CH_RX, LL_DMAMUX_REQ_SPIx_RX);
+#elif defined(PY32F0)
+    py32_dma_set_request(DMA_CH_RX, PY32_DMA_REQ_SPIx_RX);
 #endif
     LL_DMA_ConfigTransfer(DMA1, DMA_CH_RX,
                           LL_DMA_DIRECTION_PERIPH_TO_MEMORY | //

@@ -5,3 +5,7 @@ tmp
 package-lock.json
 Makefile.user
 spibridge/gpiod.h
+
+# PY32: Puya device pack for pyOCD (tools/README.md says where it comes from)
+tools/*.pack
+__pycache__/
