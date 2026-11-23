@@ -226,6 +226,17 @@ void DMA_Handler(void) {
 
         int errCode = 0;
         if (isr & DMA_ISR_TC_TX) {
+#if defined(PY32F0)
+            // F1-style USART: TC is set by ANY gap between bytes (TXE still set at
+            // the end of a stop bit, which DMA latency causes now and then), and a
+            // DMA write to DR doesn't clear it. So TC is usually already set here,
+            // the wait below returned at once, and the end-of-frame pulse cut off
+            // the last bytes: every frame failed its CRC at the receiver (captured
+            // on silicon 2026-10-07; docs/py32-porting.md). The DMA has only
+            // just handed over the last byte, so at least one byte time remains:
+            // clear TC now and wait for the real end of the frame.
+            py32_usart_clear_tc(USARTx);
+#endif
             while (!LL_USART_IsActiveFlag_TC(USARTx))
                 ;
 // the standard BRK signal is too short - it's 10uS - to be detected as break at least on NRF52
