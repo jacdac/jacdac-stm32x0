@@ -61,7 +61,7 @@
 // PY32's DMA matches C031's: 3 channels, Channel1 + Channel2_3 IRQs. Channel 1 is
 // the WS2812 SPI output (spidef.h), so the UART takes 2 (TX) and 3 (RX). Requests
 // are routed through SYSCFG_CFGR3 (py32_dma_set_request), as PY32 has no DMAMUX.
-// NEW_UART selects 16x oversampling with BRR = HSI_MHZ (48) below, which is what
+// NEW_UART selects 16x oversampling with BRR = HSI_MHZ (48 on F030, 24 on F003) below, which is what
 // PY32 needs (its OVER8 bit lives in CR3, not CR1, and CR3 is zeroed below).
 #define DMA_IRQn DMA1_Channel2_3_IRQn
 #define DMA_Handler DMA1_Channel2_3_IRQHandler
@@ -318,7 +318,8 @@ static void USART_UART_Init(void) {
     LL_RCC_SetUSARTClockSource(LL_RCC_USART1_CLKSOURCE_SYSCLK);
 #elif defined(PY32F0)
     // PY32 has no USART clock mux: USART1 always runs from PCLK, which is fixed at
-    // 48 MHz (py32f0.h), so BRR = HSI_MHZ (48) gives exactly 1 Mbaud at 16x.
+    // HSI_MHZ (48 MHz on F030, 24 MHz on F003; py32f0.h), so BRR = HSI_MHZ gives
+    // exactly 1 Mbaud at 16x on both.
 #else
     LL_RCC_SetUSARTClockSource(LL_RCC_USART1_CLKSOURCE_HSI);
 #endif

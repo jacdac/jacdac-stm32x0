@@ -117,8 +117,9 @@ bool clk_is_pll(void) {
 
 void clk_setup_pll(void) {
 #if defined(STM32C0) || defined(PY32F0)
-    // C0 has no PLL, and PY32 runs its PLL at a fixed x2 that is never switched at
-    // runtime: in both cases the 48 MHz system clock is set up once in SystemInit().
+    // C0 has no PLL, and PY32 never switches its clock at runtime (48 MHz on F030
+    // from a fixed x2 PLL, 24 MHz on F003 with no PLL): in both cases the system
+    // clock is set up once in SystemInit().
 #else
 #if defined(STM32G0)
     // run at 48 MHz for compatibility with F0
